@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>TaskCalendar</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#020617;color:#e2e8f0;font-family:'Segoe UI',sans-serif}
+  input[type=date]::-webkit-calendar-picker-indicator{filter:invert(1)}
+  select option{background:#1e293b}
+  textarea{font-family:'Segoe UI',sans-serif}
+  ::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:#0f172a}::-webkit-scrollbar-thumb{background:#334155;border-radius:3px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useMemo,useEffect,useCallback} = React;
+
+// ── SUPABASE CONFIG ──
+const SUPABASE_URL = "https://zcdvxrhldqcnizpspvdx.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpjZHZ4cmhsZHFjbml6cHNwdmR4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMxNDIzODMsImV4cCI6MjA4ODcxODM4M30.CD-ObU2hF3Ay76Jhtvnh8zHbEUX0ZV70LelGaoQc1Tg";
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const COLORS=["#6366f1","#10b981","#f59e0b","#ef4444","#3b82f6","#ec4899","#8b5cf6"];
+const PRIORITIES=["Low","Medium","High"];
+const PC={Low:"#10b981",Medium:"#f59e0b",High:"#ef4444"};
+const MONTHS=["January","February","March","April","May","June","July","August","September","October","November","December"];
+const DAYS=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+const SM={
+  pending:  {label:"Pending",  color:"#f59e0b",bg:"#f59e0b22",icon:"⏳"},
+  completed:{label:"Completed",color:"#10b981",bg:"#10b98122",icon:"✅"},
+  missed:   {label:"Missed",   color:"#ef4444",bg:"#ef444422",icon:"❌"},
+  deferred: {label:"Deferred", color:"#8b5cf6",bg:"#8b5cf622",icon:"🔄"},
+};
+const MISS_REASONS=["Unexpected priority","Blocked by dependency","Insufficient time","Resource unavailable","Forgot / overlooked","Personal emergency","Technical issue","Scope changed","Other"];
+
+const tod=new Date(); tod.setHours(0,0,0,0);
+const fmt=d=>d.toISOString().split("T")[0];
+const sow=d=>{const c=new Date(d);c.setDate(c.getDate()-c.getDay());return c;};
+const addD=(d,n)=>{const c=new Date(d);c.setDate(c.getDate()+n);return c;};
+const isPast=ds=>new Date(ds+"T00:00:00")<tod;
+
+const DEF=[
+  {id:1,title:"Morning standup",date:fmt(tod),priority:"High",status:"pending",color:"#6366f1",repeat:"daily",notes:"",reason:"",reasonDetail:"",completedAt:null},
+  {id:2,title:"Weekly review",date:fmt(tod),priority:"Medium",status:"pending",color:"#10b981",repeat:"weekly",notes:"",reason:"",reasonDetail:"",completedAt:null},
+];
+
+function App(){
+  const [view,setView]=useState("monthly");
+  const [cur,setCur]=useState(new Date(tod));
+  const [tasks,setTasks]=useState([]);
+  const [syncing,setSyncing]=useState(false);
+  const [syncMsg,setSyncMsg]=useState("⏳ Connecting...");
+  const [showModal,setShowModal]=useState(false);
+  const [showExport,setShowExport]=useState(false);
+  const [showReason,setShowReason]=useState(false);
+  const [reasonTask,setReasonTask]=useState(null);
+  const [pendingStatus,setPendingStatus]=useState("missed");
+  const [reasonData,setReasonData]=useState({reason:"",reasonDetail:""});
+  const [editTask,setEditTask]=useState(null);
+  const [form,setForm]=useState({title:"",date:fmt(tod),priority:"Medium",color:"#6366f1",repeat:"none",notes:""});
+  const [filter,setFilter]=useState("all");
+  const [sfilt,setSfilt]=useState("all");
+  const [expOpts,setExpOpts]=useState({range:"current",format:"pdf",groupBy:"status",includeDone:true,includeNotes:true,includeReasons:true});
+
+  // ── SUPABASE LOAD ──
+  async function loadFromSupabase(){
+    try{
+      const {data,error}=await supabase.from("tasks").select("*").eq("id",1).single();
+      if(error){
+        // Row doesn't exist yet, create it with defaults
+        if(error.code==="PGRST116"){
+          await supabase.from("tasks").insert({id:1,data:DEF});
+          setTasks(DEF);
+        }else throw error;
+      }else{
+        setTasks(data.data||DEF);
+      }
+      setSyncMsg("✅ Synced");
+      setTimeout(()=>setSyncMsg(""),2000);
+    }catch(e){
+      setSyncMsg("⚠️ Sync error");
+      console.error(e);
+    }
+  }
+
+  // ── SUPABASE SAVE ──
+  const saveToSupabase=useCallback(async(newTasks)=>{
+    setSyncing(true);setSyncMsg("☁️ Saving...");
+    try{
+      const {error}=await supabase.from("tasks").upsert({id:1,data:newTasks,updated_at:new Date().toISOString()});
+      if(error)throw error;
+      setSyncMsg("✅ Saved & synced");
+      setTimeout(()=>setSyncMsg(""),2000);
+    }catch(e){
+      setSyncMsg("⚠️ Save failed");
+      console.error(e);
+    }finally{setSyncing(false);}
+  },[]);
+
+  useEffect(()=>{loadFromSupabase();},[]);
+
+  // ── REALTIME SUBSCRIPTION ──
+  useEffect(()=>{
+    const channel=supabase.channel("tasks-changes")
+      .on("postgres_changes",{event:"*",schema:"public",table:"tasks"},payload=>{
+        if(payload.new&&payload.new.data){
+          setTasks(payload.new.data);
+          setSyncMsg("🔄 Updated");
+          setTimeout(()=>setSyncMsg(""),2000);
+        }
+      }).subscribe();
+    return()=>supabase.removeChannel(channel);
+  },[]);
+
+  // Auto-mark past pending as missed
+  useEffect(()=>{
+    if(tasks.length===0)return;
+    const updated=tasks.map(t=>(t.status==="pending"&&isPast(t.date)&&t.repeat==="none")?{...t,status:"missed"}:t);
+    const changed=updated.some((t,i)=>t.status!==tasks[i]?.status);
+    if(changed){setTasks(updated);saveToSupabase(updated);}
+  },[tasks.length]);
+
+  function updateTasks(newTasks){setTasks(newTasks);saveToSupabase(newTasks);}
+
+  const expanded=useMemo(()=>{
+    const res=[];
+    const rs=new Date(cur),re=new Date(cur);
+    if(view==="daily"){re.setDate(re.getDate()+1);}
+    else if(view==="weekly"){const ws=sow(cur);rs.setTime(ws.getTime());re.setTime(addD(ws,7).getTime());}
+    else{rs.setDate(1);re.setMonth(re.getMonth()+1);re.setDate(0);re.setDate(re.getDate()+1);}
+    tasks.forEach(t=>{
+      const base=new Date(t.date+"T00:00:00");
+      if(t.repeat==="none"){res.push({...t});return;}
+      let c=new Date(base);
+      const lim=new Date(re);lim.setDate(lim.getDate()+1);
+      while(c<=lim){
+        if(c>=rs)res.push({...t,date:fmt(c),_oid:t.id});
+        if(t.repeat==="daily")c=addD(c,1);
+        else if(t.repeat==="weekly")c=addD(c,7);
+        else if(t.repeat==="monthly"){c=new Date(c);c.setMonth(c.getMonth()+1);}
+        else break;
+        if(c>lim)break;
+      }
+    });
+    return res;
+  },[tasks,cur,view]);
+
+  const tfd=ds=>expanded.filter(t=>t.date===ds&&(filter==="all"||t.priority===filter)&&(sfilt==="all"||t.status===sfilt));
+
+  const openAdd=ds=>{setEditTask(null);setForm({title:"",date:ds,priority:"Medium",color:"#6366f1",repeat:"none",notes:""});setShowModal(true);};
+  const openEdit=t=>{setEditTask(t);setForm({title:t.title,date:t.date,priority:t.priority,color:t.color,repeat:t.repeat||"none",notes:t.notes||""});setShowModal(true);};
+
+  function saveTask(){
+    if(!form.title.trim())return;
+    let newTasks;
+    if(editTask)newTasks=tasks.map(t=>t.id===(editTask._oid||editTask.id)?{...t,...form}:t);
+    else newTasks=[...tasks,{id:Date.now(),...form,status:"pending",reason:"",reasonDetail:"",completedAt:null}];
+    updateTasks(newTasks);setShowModal(false);
+  }
+  function delTask(id){updateTasks(tasks.filter(t=>t.id!==id));setShowModal(false);}
+  const markComplete=(t,e)=>{e&&e.stopPropagation();const id=t._oid||t.id;updateTasks(tasks.map(x=>x.id===id?{...x,status:"completed",completedAt:new Date().toISOString(),reason:"",reasonDetail:""}:x));};
+  const resetStatus=(t,e)=>{e&&e.stopPropagation();const id=t._oid||t.id;updateTasks(tasks.map(x=>x.id===id?{...x,status:"pending",reason:"",reasonDetail:"",completedAt:null}:x));};
+  function askReason(t,ns,e){e&&e.stopPropagation();setReasonTask(t);setPendingStatus(ns);setReasonData({reason:"",reasonDetail:""});setShowReason(true);}
+  function saveReason(){
+    if(!reasonTask||!reasonData.reason)return;
+    const id=reasonTask._oid||reasonTask.id;
+    updateTasks(tasks.map(x=>x.id===id?{...x,status:pendingStatus,reason:reasonData.reason,reasonDetail:reasonData.reasonDetail}:x));
+    setShowReason(false);setReasonTask(null);
+  }
+
+  function nav(dir){const d=new Date(cur);if(view==="daily")d.setDate(d.getDate()+dir);else if(view==="weekly")d.setDate(d.getDate()+dir*7);else d.setMonth(d.getMonth()+dir);setCur(d);}
+  const navLabel=()=>{
+    if(view==="daily")return cur.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric"});
+    if(view==="weekly"){const ws=sow(cur),we=addD(ws,6);return`${ws.toLocaleDateString("en-US",{month:"short",day:"numeric"})} – ${we.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}`;}
+    return`${MONTHS[cur.getMonth()]} ${cur.getFullYear()}`;
+  };
+
+  // ── EXPORT ──
+  function getExpTasks(){
+    let src=[...tasks];
+    if(!expOpts.includeDone)src=src.filter(t=>t.status!=="completed");
+    const n=new Date(tod);let s,e;
+    if(expOpts.range==="today"){s=e=fmt(n);}
+    else if(expOpts.range==="week"){const ws=sow(n);s=fmt(ws);e=fmt(addD(ws,6));}
+    else if(expOpts.range==="month"){s=fmt(new Date(n.getFullYear(),n.getMonth(),1));e=fmt(new Date(n.getFullYear(),n.getMonth()+1,0));}
+    else if(expOpts.range==="current"){
+      if(view==="daily"){s=e=fmt(cur);}
+      else if(view==="weekly"){const ws=sow(cur);s=fmt(ws);e=fmt(addD(ws,6));}
+      else{s=fmt(new Date(cur.getFullYear(),cur.getMonth(),1));e=fmt(new Date(cur.getFullYear(),cur.getMonth()+1,0));}
+    }else return src;
+    return src.filter(t=>t.date>=s&&t.date<=e);
+  }
+  function buildHTML(list){
+    const rl=expOpts.range==="current"?navLabel():expOpts.range==="today"?"Today":expOpts.range==="week"?"This Week":expOpts.range==="month"?"This Month":"All Tasks";
+    const tot=list.length,comp=list.filter(t=>t.status==="completed").length,miss=list.filter(t=>t.status==="missed").length,def=list.filter(t=>t.status==="deferred").length,pend=list.filter(t=>t.status==="pending").length;
+    const rate=tot?Math.round((comp/tot)*100):0;
+    let grouped={};
+    if(expOpts.groupBy==="status"){["completed","pending","missed","deferred"].forEach(s=>{const g=list.filter(t=>t.status===s);if(g.length)grouped[SM[s].icon+" "+SM[s].label]=g;});}
+    else if(expOpts.groupBy==="priority"){["High","Medium","Low"].forEach(p=>{const g=list.filter(t=>t.priority===p);if(g.length)grouped[p+" Priority"]=g;});}
+    else if(expOpts.groupBy==="date"){list.forEach(t=>{grouped[t.date]=grouped[t.date]||[];grouped[t.date].push(t);});}
+    else grouped["All Tasks"]=list;
+    const rows=Object.entries(grouped).map(([g,ts])=>`<div class="group"><div class="gh">${g}</div>${ts.map(t=>`<div class="tr"><div class="dot" style="background:${PC[t.priority]}"></div><div class="ti"><div class="tt ${t.status==="completed"?"done":""}">${t.title}<span class="badge" style="background:${SM[t.status].bg};color:${SM[t.status].color}">${SM[t.status].icon} ${SM[t.status].label}</span>${t.repeat!=="none"?`<span class="badge">🔁 ${t.repeat}</span>`:""}</div><div class="meta">📅 ${t.date}${t.completedAt?` · ✅ ${new Date(t.completedAt).toLocaleString()}`:""}${expOpts.includeNotes&&t.notes?` · 📝 ${t.notes}`:""}</div>${expOpts.includeReasons&&(t.status==="missed"||t.status==="deferred")&&t.reason?`<div class="reason"><strong>${t.status==="missed"?"❌ Missed":"🔄 Deferred"}:</strong> ${t.reason}${t.reasonDetail?` — ${t.reasonDetail}`:""}</div>`:""}</div><span class="pt" style="background:${PC[t.priority]}22;color:${PC[t.priority]}">${t.priority}</span></div>`).join("")}</div>`).join("");
+    return`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>TaskCalendar Report</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Segoe UI',sans-serif;background:#f8fafc;color:#1e293b;padding:32px}.hdr{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-radius:16px;padding:28px 32px;margin-bottom:24px}.hdr h1{font-size:26px;font-weight:800;margin-bottom:4px}.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px}.stat{background:#fff;border-radius:12px;padding:14px;border:1px solid #e2e8f0;text-align:center}.stat .v{font-size:26px;font-weight:800}.stat .l{font-size:11px;color:#64748b;margin-top:3px;font-weight:600}.prog{background:#fff;border-radius:12px;padding:16px 20px;margin-bottom:20px;border:1px solid #e2e8f0}.bar{height:10px;background:#e2e8f0;border-radius:5px;margin-top:8px;overflow:hidden}.fill{height:100%;border-radius:5px;background:linear-gradient(90deg,#6366f1,#10b981)}.group{background:#fff;border-radius:12px;border:1px solid #e2e8f0;margin-bottom:14px;overflow:hidden}.gh{background:#f1f5f9;padding:10px 18px;font-weight:700;font-size:13px;color:#475569;text-transform:uppercase}.tr{display:flex;align-items:flex-start;gap:12px;padding:12px 18px;border-bottom:1px solid #f1f5f9}.tr:last-child{border-bottom:none}.dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;margin-top:4px}.ti{flex:1}.tt{font-size:14px;font-weight:600}.tt.done{text-decoration:line-through;color:#94a3b8}.meta{font-size:11px;color:#94a3b8;margin-top:3px}.reason{font-size:12px;color:#dc2626;background:#fef2f2;border-left:3px solid #ef4444;padding:5px 10px;border-radius:4px;margin-top:5px}.badge{font-size:10px;background:#e2e8f0;color:#475569;border-radius:20px;padding:1px 8px;font-weight:600;margin-left:6px}.pt{font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;flex-shrink:0}.footer{text-align:center;color:#94a3b8;font-size:12px;margin-top:24px}</style></head><body><div class="hdr"><h1>📋 TaskCalendar Report</h1><div style="opacity:.85;font-size:14px">Period: ${rl} · Generated: ${new Date().toLocaleString()}</div></div><div class="stats"><div class="stat"><div class="v">${tot}</div><div class="l">Total</div></div><div class="stat"><div class="v" style="color:#10b981">${comp}</div><div class="l">Completed</div></div><div class="stat"><div class="v" style="color:#f59e0b">${pend}</div><div class="l">Pending</div></div><div class="stat"><div class="v" style="color:#ef4444">${miss}</div><div class="l">Missed</div></div><div class="stat"><div class="v" style="color:#8b5cf6">${def}</div><div class="l">Deferred</div></div></div><div class="prog"><div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700"><span>Completion Rate</span><span style="color:#6366f1">${rate}%</span></div><div class="bar"><div class="fill" style="width:${rate}%"></div></div></div>${rows}<div class="footer">TaskCalendar · Exported ${new Date().toLocaleDateString()}</div></body></html>`;
+  }
+  function doExport(){
+    const list=getExpTasks();
+    if(expOpts.format==="csv"){const rows=[["Title","Date","Priority","Status","Repeat","Reason","Detail","CompletedAt","Notes"]];list.forEach(t=>rows.push([`"${(t.title||"").replace(/"/g,'""')}"`,t.date,t.priority,t.status,t.repeat||"none",expOpts.includeReasons?(t.reason||""):"",expOpts.includeReasons?`"${(t.reasonDetail||"").replace(/"/g,'""')}"` :"",t.completedAt?new Date(t.completedAt).toLocaleString():"",expOpts.includeNotes?`"${(t.notes||"").replace(/"/g,'""')}"` :""]));const b=new Blob([rows.map(r=>r.join(",")).join("\n")],{type:"text/csv"});const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=`taskcalendar-${fmt(tod)}.csv`;a.click();}
+    else if(expOpts.format==="json"){const b=new Blob([JSON.stringify(list,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=`taskcalendar-${fmt(tod)}.json`;a.click();}
+    else{const w=window.open("","_blank");w.document.write(buildHTML(list));w.document.close();setTimeout(()=>w.print(),400);}
+    setShowExport(false);
+  }
+
+  function StatusBar({t}){
+    const s=SM[t.status];
+    return(<div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:6}}>
+      <span style={{fontSize:10,background:s.bg,color:s.color,borderRadius:20,padding:"2px 8px",fontWeight:700}}>{s.icon} {s.label}</span>
+      {t.status!=="completed"&&<button onClick={e=>markComplete(t,e)} style={{fontSize:10,padding:"2px 8px",borderRadius:20,border:"none",background:"#10b98122",color:"#10b981",fontWeight:700,cursor:"pointer"}}>✅ Done</button>}
+      {t.status!=="missed"&&<button onClick={e=>askReason(t,"missed",e)} style={{fontSize:10,padding:"2px 8px",borderRadius:20,border:"none",background:"#ef444422",color:"#ef4444",fontWeight:700,cursor:"pointer"}}>❌ Missed</button>}
+      {t.status!=="deferred"&&<button onClick={e=>askReason(t,"deferred",e)} style={{fontSize:10,padding:"2px 8px",borderRadius:20,border:"none",background:"#8b5cf622",color:"#8b5cf6",fontWeight:700,cursor:"pointer"}}>🔄 Defer</button>}
+      {t.status!=="pending"&&<button onClick={e=>resetStatus(t,e)} style={{fontSize:10,padding:"2px 8px",borderRadius:20,border:"none",background:"#1e293b",color:"#64748b",fontWeight:700,cursor:"pointer"}}>↩ Reset</button>}
+    </div>);
+  }
+
+  function renderMonthly(){
+    const yr=cur.getFullYear(),mo=cur.getMonth();
+    const fd=new Date(yr,mo,1).getDay(),dim=new Date(yr,mo+1,0).getDate();
+    const cells=[];for(let i=0;i<fd;i++)cells.push(null);for(let d=1;d<=dim;d++)cells.push(new Date(yr,mo,d));
+    return(<div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,marginBottom:4}}>{DAYS.map(d=><div key={d} style={{textAlign:"center",fontWeight:700,fontSize:11,color:"#94a3b8",padding:"5px 0"}}>{d}</div>)}</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3}}>
+        {cells.map((date,i)=>{
+          if(!date)return<div key={i}/>;
+          const ds=fmt(date),ts=tfd(ds),isT=ds===fmt(tod);
+          const hasMiss=ts.some(t=>t.status==="missed"),hasDone=ts.some(t=>t.status==="completed");
+          return(<div key={ds} onClick={()=>{setCur(new Date(ds+"T00:00:00"));setView("daily");}} style={{minHeight:78,background:"#0f172a",border:isT?"2px solid #6366f1":"1px solid #1e293b",borderRadius:9,padding:5,cursor:"pointer"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2}}>
+              <div style={{display:"flex",alignItems:"center",gap:3}}>
+                <span style={{fontWeight:isT?700:400,color:isT?"#6366f1":"#cbd5e1",fontSize:12}}>{date.getDate()}</span>
+                {hasMiss&&<span style={{width:5,height:5,borderRadius:"50%",background:"#ef4444",display:"inline-block"}}/>}
+                {hasDone&&<span style={{width:5,height:5,borderRadius:"50%",background:"#10b981",display:"inline-block"}}/>}
+              </div>
+              <button onClick={e=>{e.stopPropagation();openAdd(ds);}} style={{background:"none",border:"none",color:"#6366f1",fontSize:15,cursor:"pointer",lineHeight:1,padding:0}}>+</button>
+            </div>
+            {ts.slice(0,3).map(t=><div key={t.id+t.date} onClick={e=>{e.stopPropagation();openEdit(t);}} style={{background:t.color+"22",borderLeft:`3px solid ${SM[t.status].color}`,borderRadius:3,padding:"2px 4px",marginBottom:2,fontSize:10,color:"#e2e8f0",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",textDecoration:t.status==="completed"?"line-through":"none",opacity:t.status==="completed"?0.55:1}}>{SM[t.status].icon} {t.title}</div>)}
+            {ts.length>3&&<div style={{fontSize:9,color:"#64748b"}}>+{ts.length-3} more</div>}
+          </div>);
+        })}
+      </div>
+    </div>);
+  }
+
+  function renderWeekly(){
+    const ws=sow(cur),days=Array.from({length:7},(_,i)=>addD(ws,i));
+    return(<div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:5}}>
+      {days.map(date=>{
+        const ds=fmt(date),ts=tfd(ds),isT=ds===fmt(tod);
+        return(<div key={ds} style={{background:"#0f172a",border:isT?"2px solid #6366f1":"1px solid #1e293b",borderRadius:10,padding:8,minHeight:180}}>
+          <div style={{textAlign:"center",marginBottom:6}}><div style={{fontSize:10,color:"#64748b",fontWeight:700}}>{DAYS[date.getDay()]}</div><div style={{fontSize:20,fontWeight:700,color:isT?"#6366f1":"#e2e8f0"}}>{date.getDate()}</div></div>
+          {ts.map(t=><div key={t.id+t.date} style={{background:t.color+"22",borderLeft:`3px solid ${SM[t.status].color}`,borderRadius:5,padding:"5px 6px",marginBottom:5}}>
+            <div style={{fontSize:11,fontWeight:600,color:"#e2e8f0",textDecoration:t.status==="completed"?"line-through":"none",opacity:t.status==="completed"?0.6:1,cursor:"pointer",marginBottom:3}} onClick={()=>openEdit(t)}>{t.title}</div>
+            <StatusBar t={t}/>
+          </div>)}
+          <button onClick={()=>openAdd(ds)} style={{width:"100%",marginTop:3,background:"none",border:"1px dashed #334155",borderRadius:5,color:"#475569",fontSize:10,padding:"3px 0",cursor:"pointer"}}>+ Add</button>
+        </div>);
+      })}
+    </div>);
+  }
+
+  function renderDaily(){
+    const ds=fmt(cur),ts=tfd(ds),comp=ts.filter(t=>t.status==="completed").length;
+    return(<div style={{maxWidth:560,margin:"0 auto"}}>
+      {ts.length>0&&<div style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:12,padding:"10px 16px",marginBottom:12,display:"flex",alignItems:"center",gap:12}}>
+        <span style={{fontSize:13,color:"#94a3b8",flexShrink:0}}>Progress</span>
+        <div style={{flex:1,height:8,background:"#1e293b",borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:`${ts.length?Math.round((comp/ts.length)*100):0}%`,background:"linear-gradient(90deg,#6366f1,#10b981)",borderRadius:4,transition:"width .4s"}}/></div>
+        <span style={{fontSize:13,fontWeight:700,color:"#10b981",flexShrink:0}}>{comp}/{ts.length} done</span>
+      </div>}
+      {ts.length===0&&<div style={{textAlign:"center",color:"#475569",padding:36,fontSize:14}}>No tasks. Click + to add one!</div>}
+      {ts.map(t=>{const s=SM[t.status];return(<div key={t.id+t.date} style={{background:"#0f172a",border:`1px solid ${s.color}44`,borderLeft:`4px solid ${s.color}`,borderRadius:12,padding:14,marginBottom:10}}>
+        <div style={{display:"flex",alignItems:"flex-start",gap:10}}>
+          <div style={{flex:1}}>
+            <div style={{fontWeight:700,fontSize:15,color:t.status==="completed"?"#475569":"#e2e8f0",textDecoration:t.status==="completed"?"line-through":"none",cursor:"pointer"}} onClick={()=>openEdit(t)}>{t.title}</div>
+            {t.notes&&<div style={{fontSize:12,color:"#64748b",marginTop:2}}>{t.notes}</div>}
+            {(t.status==="missed"||t.status==="deferred")&&t.reason&&<div style={{fontSize:11,color:s.color,background:s.bg,borderRadius:6,padding:"4px 8px",marginTop:5}}><strong>{t.status==="missed"?"Missed":"Deferred"}:</strong> {t.reason}{t.reasonDetail?` — ${t.reasonDetail}`:""}</div>}
+            {t.completedAt&&<div style={{fontSize:11,color:"#10b981",marginTop:4}}>✅ {new Date(t.completedAt).toLocaleString()}</div>}
+            <StatusBar t={t}/>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4,flexShrink:0}}>
+            <span style={{background:PC[t.priority]+"22",color:PC[t.priority],borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700}}>{t.priority}</span>
+            {t.repeat!=="none"&&<span style={{fontSize:10,color:"#6366f1",background:"#6366f122",borderRadius:10,padding:"2px 7px"}}>🔁 {t.repeat}</span>}
+          </div>
+        </div>
+      </div>);})}
+      <button onClick={()=>openAdd(ds)} style={{width:"100%",padding:"11px 0",background:"#1e293b",border:"2px dashed #334155",borderRadius:12,color:"#6366f1",fontWeight:700,fontSize:14,cursor:"pointer",marginTop:2}}>+ Add Task</button>
+    </div>);
+  }
+
+  const doneC=tasks.filter(t=>t.status==="completed").length;
+  const missC=tasks.filter(t=>t.status==="missed").length;
+  const inp={width:"100%",boxSizing:"border-box",padding:"9px 13px",background:"#1e293b",border:"1px solid #334155",borderRadius:9,color:"#e2e8f0",fontSize:14,outline:"none",marginTop:4,marginBottom:12};
+
+  return(<div style={{minHeight:"100vh",background:"#020617",color:"#e2e8f0",fontFamily:"'Segoe UI',sans-serif",padding:"16px"}}>
+  <div style={{maxWidth:1050,margin:"0 auto"}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
+      <div>
+        <h1 style={{margin:0,fontSize:22,fontWeight:800,background:"linear-gradient(90deg,#6366f1,#8b5cf6)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>📋 TaskCalendar</h1>
+        <div style={{fontSize:12,color:"#475569",marginTop:2}}>
+          <span style={{color:"#10b981"}}>✅ {doneC} done</span>&nbsp;·&nbsp;<span style={{color:"#ef4444"}}>❌ {missC} missed</span>&nbsp;·&nbsp;<span>{tasks.length} total</span>
+          {syncMsg&&<span style={{marginLeft:10,color:syncMsg.includes("✅")?"#10b981":syncMsg.includes("⚠")?"#ef4444":"#6366f1"}}>{syncMsg}</span>}
+        </div>
+      </div>
+      <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+        {["daily","weekly","monthly"].map(v=><button key={v} onClick={()=>setView(v)} style={{padding:"6px 14px",borderRadius:20,border:"none",background:view===v?"#6366f1":"#1e293b",color:view===v?"#fff":"#94a3b8",fontWeight:700,fontSize:12,cursor:"pointer",textTransform:"capitalize"}}>{v}</button>)}
+        <button onClick={()=>setShowExport(true)} style={{padding:"6px 14px",borderRadius:20,border:"none",background:"linear-gradient(135deg,#10b981,#059669)",color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}}>⬇ Export</button>
+      </div>
+    </div>
+    <div style={{display:"flex",gap:4,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
+      {["all","High","Medium","Low"].map(p=><button key={p} onClick={()=>setFilter(p)} style={{padding:"3px 10px",borderRadius:20,border:"none",fontSize:11,fontWeight:600,cursor:"pointer",background:filter===p?(p==="all"?"#334155":PC[p]+"33"):"#0f172a",color:filter===p?(p==="all"?"#e2e8f0":PC[p]):"#475569",outline:filter===p?`1px solid ${p==="all"?"#334155":PC[p]}`:"none"}}>{p==="all"?"All Priority":p}</button>)}
+      <div style={{width:1,height:16,background:"#1e293b",margin:"0 2px"}}/>
+      {["all","pending","completed","missed","deferred"].map(s=>{const m=SM[s]||{};return(<button key={s} onClick={()=>setSfilt(s)} style={{padding:"3px 10px",borderRadius:20,border:"none",fontSize:11,fontWeight:600,cursor:"pointer",background:sfilt===s?(s==="all"?"#334155":m.bg):"#0f172a",color:sfilt===s?(s==="all"?"#e2e8f0":m.color):"#475569",outline:sfilt===s?`1px solid ${s==="all"?"#334155":m.color}`:"none"}}>{s==="all"?"All Status":`${m.icon} ${m.label}`}</button>);})}
+      <button onClick={()=>openAdd(fmt(cur))} style={{marginLeft:"auto",padding:"5px 16px",borderRadius:20,border:"none",background:"#6366f1",color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}}>+ New Task</button>
+    </div>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:14,marginBottom:16}}>
+      <button onClick={()=>nav(-1)} style={{background:"#1e293b",border:"none",color:"#e2e8f0",borderRadius:8,padding:"5px 13px",fontSize:16,cursor:"pointer"}}>‹</button>
+      <button onClick={()=>setCur(new Date(tod))} style={{background:"none",border:"none",color:"#6366f1",fontWeight:700,fontSize:12,cursor:"pointer"}}>Today</button>
+      <span style={{fontWeight:700,fontSize:14,color:"#e2e8f0",minWidth:220,textAlign:"center"}}>{navLabel()}</span>
+      <button onClick={()=>nav(1)} style={{background:"#1e293b",border:"none",color:"#e2e8f0",borderRadius:8,padding:"5px 13px",fontSize:16,cursor:"pointer"}}>›</button>
+    </div>
+    {view==="monthly"&&renderMonthly()}
+    {view==="weekly"&&renderWeekly()}
+    {view==="daily"&&renderDaily()}
+  </div>
+
+  {showModal&&<div style={{position:"fixed",inset:0,background:"#00000090",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100,padding:16}} onClick={()=>setShowModal(false)}>
+    <div style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:16,padding:24,width:"100%",maxWidth:400,boxShadow:"0 25px 60px #0008"}} onClick={e=>e.stopPropagation()}>
+      <h2 style={{margin:"0 0 16px",fontWeight:800,fontSize:17,color:"#e2e8f0"}}>{editTask?"Edit Task":"Add New Task"}</h2>
+      <label style={{fontSize:11,color:"#64748b",fontWeight:700}}>TITLE</label>
+      <input value={form.title} onChange={e=>setForm(f=>({...f,title:e.target.value}))} placeholder="Task title..." autoFocus style={inp}/>
+      <label style={{fontSize:11,color:"#64748b",fontWeight:700}}>DEADLINE DATE</label>
+      <input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} style={inp}/>
+      <div style={{display:"flex",gap:10}}>
+        <div style={{flex:1}}><label style={{fontSize:11,color:"#64748b",fontWeight:700}}>PRIORITY</label><select value={form.priority} onChange={e=>setForm(f=>({...f,priority:e.target.value}))} style={{...inp,marginBottom:12}}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></div>
+        <div style={{flex:1}}><label style={{fontSize:11,color:"#64748b",fontWeight:700}}>REPEAT</label><select value={form.repeat} onChange={e=>setForm(f=>({...f,repeat:e.target.value}))} style={{...inp,marginBottom:12}}>{["none","daily","weekly","monthly"].map(r=><option key={r}>{r}</option>)}</select></div>
+      </div>
+      <label style={{fontSize:11,color:"#64748b",fontWeight:700}}>COLOR</label>
+      <div style={{display:"flex",gap:7,marginTop:5,marginBottom:12}}>{COLORS.map(c=><div key={c} onClick={()=>setForm(f=>({...f,color:c}))} style={{width:24,height:24,borderRadius:"50%",background:c,cursor:"pointer",border:form.color===c?"3px solid #fff":"3px solid transparent"}}/>)}</div>
+      <label style={{fontSize:11,color:"#64748b",fontWeight:700}}>NOTES</label>
+      <textarea value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))} placeholder="Optional notes..." style={{...inp,resize:"vertical",minHeight:50,marginBottom:16}}/>
+      <div style={{display:"flex",gap:7}}>
+        {editTask&&<button onClick={()=>delTask(editTask._oid||editTask.id)} style={{flex:1,padding:"10px 0",borderRadius:9,border:"none",background:"#ef444422",color:"#ef4444",fontWeight:700,fontSize:13,cursor:"pointer"}}>Delete</button>}
+        <button onClick={()=>setShowModal(false)} style={{flex:1,padding:"10px 0",borderRadius:9,border:"none",background:"#1e293b",color:"#94a3b8",fontWeight:700,fontSize:13,cursor:"pointer"}}>Cancel</button>
+        <button onClick={saveTask} style={{flex:2,padding:"10px 0",borderRadius:9,border:"none",background:"#6366f1",color:"#fff",fontWeight:700,fontSize:13,cursor:"pointer"}}>{editTask?"Save Changes":"Add Task"}</button>
+      </div>
+    </div>
+  </div>}
+
+  {showReason&&reasonTask&&<div style={{position:"fixed",inset:0,background:"#000000a0",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200,padding:16}} onClick={()=>setShowReason(false)}>
+    <div style={{background:"#0f172a",border:"1px solid #334155",borderRadius:16,padding:24,width:"100%",maxWidth:420,boxShadow:"0 25px 60px #0008"}} onClick={e=>e.stopPropagation()}>
+      <h2 style={{margin:"0 0 4px",fontWeight:800,fontSize:17,color:"#e2e8f0"}}>Why wasn't this completed?</h2>
+      <div style={{fontSize:12,color:"#64748b",marginBottom:16}}>Task: <strong style={{color:"#e2e8f0"}}>{reasonTask.title}</strong></div>
+      <label style={{fontSize:11,color:"#64748b",fontWeight:700}}>SELECT REASON *</label>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5,marginTop:6,marginBottom:14}}>
+        {MISS_REASONS.map(r=><button key={r} onClick={()=>setReasonData(d=>({...d,reason:r}))} style={{padding:"7px 8px",borderRadius:7,border:"none",fontSize:11,fontWeight:600,cursor:"pointer",textAlign:"left",background:reasonData.reason===r?"#6366f1":"#1e293b",color:reasonData.reason===r?"#fff":"#94a3b8"}}>{r}</button>)}
+      </div>
+      <label style={{fontSize:11,color:"#64748b",fontWeight:700}}>ADDITIONAL DETAILS (optional)</label>
+      <textarea value={reasonData.reasonDetail} onChange={e=>setReasonData(d=>({...d,reasonDetail:e.target.value}))} placeholder="What exactly happened?" style={{width:"100%",boxSizing:"border-box",marginTop:5,marginBottom:16,padding:"9px 13px",background:"#1e293b",border:"1px solid #334155",borderRadius:9,color:"#e2e8f0",fontSize:13,outline:"none",resize:"vertical",minHeight:56}}/>
+      <div style={{display:"flex",gap:7}}>
+        <button onClick={()=>setShowReason(false)} style={{flex:1,padding:"10px 0",borderRadius:9,border:"none",background:"#1e293b",color:"#94a3b8",fontWeight:700,fontSize:13,cursor:"pointer"}}>Cancel</button>
+        <button onClick={()=>{setPendingStatus("missed");setTimeout(saveReason,0);}} disabled={!reasonData.reason} style={{flex:1,padding:"10px 0",borderRadius:9,border:"none",background:reasonData.reason?"#ef444422":"#0f172a",color:reasonData.reason?"#ef4444":"#334155",fontWeight:700,fontSize:13,cursor:reasonData.reason?"pointer":"not-allowed"}}>❌ Missed</button>
+        <button onClick={()=>{setPendingStatus("deferred");setTimeout(saveReason,0);}} disabled={!reasonData.reason} style={{flex:1,padding:"10px 0",borderRadius:9,border:"none",background:reasonData.reason?"#8b5cf622":"#0f172a",color:reasonData.reason?"#8b5cf6":"#334155",fontWeight:700,fontSize:13,cursor:reasonData.reason?"pointer":"not-allowed"}}>🔄 Defer</button>
+      </div>
+    </div>
+  </div>}
+
+  {showExport&&<div style={{position:"fixed",inset:0,background:"#000000a0",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100,padding:16}} onClick={()=>setShowExport(false)}>
+    <div style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:18,padding:24,width:"100%",maxWidth:450,boxShadow:"0 30px 70px #0009"}} onClick={e=>e.stopPropagation()}>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:18}}>
+        <div style={{width:36,height:36,borderRadius:9,background:"linear-gradient(135deg,#10b981,#059669)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17}}>⬇</div>
+        <div><h2 style={{margin:0,fontWeight:800,fontSize:17,color:"#e2e8f0"}}>Export Report</h2><div style={{fontSize:11,color:"#475569"}}>Includes status, reasons & stats</div></div>
+      </div>
+      <label style={{fontSize:11,color:"#64748b",fontWeight:700}}>DATE RANGE</label>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5,marginTop:5,marginBottom:12}}>{[["current","Current"],["today","Today"],["week","This Week"],["month","This Month"],["all","All"]].map(([v,l])=><button key={v} onClick={()=>setExpOpts(o=>({...o,range:v}))} style={{padding:"7px 0",borderRadius:7,border:"none",fontSize:11,fontWeight:600,cursor:"pointer",background:expOpts.range===v?"#6366f1":"#1e293b",color:expOpts.range===v?"#fff":"#94a3b8"}}>{l}</button>)}</div>
+      <label style={{fontSize:11,color:"#64748b",fontWeight:700}}>FORMAT</label>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5,marginTop:5,marginBottom:12}}>{[["pdf","📄 PDF"],["csv","📊 CSV"],["json","🗂 JSON"]].map(([v,l])=><button key={v} onClick={()=>setExpOpts(o=>({...o,format:v}))} style={{padding:"9px 0",borderRadius:7,border:"none",fontSize:11,fontWeight:600,cursor:"pointer",background:expOpts.format===v?"#6366f1":"#1e293b",color:expOpts.format===v?"#fff":"#94a3b8"}}>{l}</button>)}</div>
+      <div style={{display:"flex",gap:7}}>
+        <button onClick={()=>setShowExport(false)} style={{flex:1,padding:"11px 0",borderRadius:9,border:"none",background:"#1e293b",color:"#94a3b8",fontWeight:700,fontSize:13,cursor:"pointer"}}>Cancel</button>
+        <button onClick={doExport} style={{flex:2,padding:"11px 0",borderRadius:9,border:"none",background:"linear-gradient(135deg,#10b981,#059669)",color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer"}}>⬇ Export {expOpts.format.toUpperCase()}</button>
+      </div>
+    </div>
+  </div>}
+  </div>);
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
