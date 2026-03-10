@@ -50,20 +50,34 @@ function App(){
   const [pfilt,setPfilt]=useState("all");
   const [liveMsg,setLiveMsg]=useState("");
 
-  async function loadTasks(){
+  const lastUpdatedRef = React.useRef(null);
+
+  async function loadTasks(isPolling=false){
     try{
       const {data,error}=await supabase.from("tasks").select("*").eq("id",1).single();
       if(!error&&data){
-        setTasks(data.data||[]);
-        setLastUpdated(data.updated_at?new Date(data.updated_at).toLocaleString():null);
+        const newUpdated = data.updated_at;
+        // Only update UI if data actually changed
+        if(!isPolling || newUpdated !== lastUpdatedRef.current){
+          if(isPolling && lastUpdatedRef.current && newUpdated !== lastUpdatedRef.current){
+            setLiveMsg("🔄 Just updated!");
+            setTimeout(()=>setLiveMsg(""),3000);
+          }
+          lastUpdatedRef.current = newUpdated;
+          setTasks(data.data||[]);
+          setLastUpdated(data.updated_at?new Date(data.updated_at).toLocaleString():null);
+        }
       }
     }catch(e){console.error(e);}
-    finally{setLoading(false);}
+    finally{if(!isPolling)setLoading(false);}
   }
 
   useEffect(()=>{
-    loadTasks();
-    // Realtime subscription — updates instantly when owner changes anything
+    // Initial load
+    loadTasks(false);
+    // Poll every 10 seconds for updates
+    const interval = setInterval(()=>loadTasks(true), 10000);
+    // Also try realtime as bonus
     const channel=supabase.channel("tasks-teamview")
       .on("postgres_changes",{event:"*",schema:"public",table:"tasks"},payload=>{
         if(payload.new&&payload.new.data){
@@ -73,7 +87,7 @@ function App(){
           setTimeout(()=>setLiveMsg(""),3000);
         }
       }).subscribe();
-    return()=>supabase.removeChannel(channel);
+    return()=>{clearInterval(interval);supabase.removeChannel(channel);};
   },[]);
 
   const expanded=useMemo(()=>{
