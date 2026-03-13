@@ -19,7 +19,6 @@
 <script type="text/babel">
 const {useState,useMemo,useEffect} = React;
 
-// ── SUPABASE CONFIG ──
 const SUPABASE_URL = "https://zcdvxrhldqcnizpspvdx.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpjZHZ4cmhsZHFjbml6cHNwdmR4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMxNDIzODMsImV4cCI6MjA4ODcxODM4M30.CD-ObU2hF3Ay76Jhtvnh8zHbEUX0ZV70LelGaoQc1Tg";
 const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -39,6 +38,29 @@ const fmt=d=>d.toISOString().split("T")[0];
 const sow=d=>{const c=new Date(d);c.setDate(c.getDate()-c.getDay());return c;};
 const addD=(d,n)=>{const c=new Date(d);c.setDate(c.getDate()+n);return c;};
 
+const fmtTime=t=>{if(!t)return"";const[h,m]=t.split(":");const hr=parseInt(h);const ampm=hr>=12?"PM":"AM";const h12=hr%12||12;return`${h12}:${m} ${ampm}`;};
+const fmtDateShort=d=>{if(!d)return"";const dt=new Date(d+"T00:00:00");return dt.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});};
+
+const calcDuration=(sd,st,ed,et)=>{
+  if(!sd||!st||!ed||!et)return null;
+  const start=new Date(`${sd}T${st}:00`),end=new Date(`${ed}T${et}:00`);
+  const diff=end-start;if(diff<=0)return null;
+  const mins=Math.floor(diff/60000);
+  const days=Math.floor(mins/1440),hrs=Math.floor((mins%1440)/60),m=mins%60;
+  let parts=[];if(days>0)parts.push(days+"d");if(hrs>0)parts.push(hrs+"h");if(m>0)parts.push(m+"m");
+  return{label:parts.join(" "),totalMins:mins};
+};
+
+const HOURS=Array.from({length:13},(_,i)=>i+7);
+const getBlockStyle=(startTime,endTime,color)=>{
+  if(!startTime||!endTime)return null;
+  const[sh,sm]=startTime.split(":").map(Number),[eh,em]=endTime.split(":").map(Number);
+  const sM=sh*60+sm,eM=eh*60+em,dsM=420,deM=1140,tot=deM-dsM;
+  const cs=Math.max(sM,dsM),ce=Math.min(eM,deM);if(ce<=cs)return null;
+  const top=((cs-dsM)/tot)*100,height=((ce-cs)/tot)*100;
+  return{position:"absolute",top:top+"%",height:Math.max(height,3)+"%",left:3,right:3,background:color+"33",borderLeft:"3px solid "+color,borderRadius:5,padding:"2px 5px",fontSize:9,color:"#e2e8f0",fontWeight:600,overflow:"hidden",minHeight:14,boxSizing:"border-box"};
+};
+
 function App(){
   const [view,setView]=useState("monthly");
   const [cur,setCur]=useState(new Date(tod));
@@ -54,16 +76,14 @@ function App(){
 
   async function loadTasks(isPolling=false){
     try{
-      const {data,error}=await supabase.from("tasks").select("*").eq("id",1).single();
+      const{data,error}=await supabase.from("tasks").select("*").eq("id",1).single();
       if(!error&&data){
-        const newUpdated = data.updated_at;
-        // Only update UI if data actually changed
-        if(!isPolling || newUpdated !== lastUpdatedRef.current){
-          if(isPolling && lastUpdatedRef.current && newUpdated !== lastUpdatedRef.current){
-            setLiveMsg("🔄 Just updated!");
-            setTimeout(()=>setLiveMsg(""),3000);
+        const newUpdated=data.updated_at;
+        if(!isPolling||newUpdated!==lastUpdatedRef.current){
+          if(isPolling&&lastUpdatedRef.current&&newUpdated!==lastUpdatedRef.current){
+            setLiveMsg("🔄 Just updated!");setTimeout(()=>setLiveMsg(""),3000);
           }
-          lastUpdatedRef.current = newUpdated;
+          lastUpdatedRef.current=newUpdated;
           setTasks(data.data||[]);
           setLastUpdated(data.updated_at?new Date(data.updated_at).toLocaleString():null);
         }
@@ -73,45 +93,35 @@ function App(){
   }
 
   useEffect(()=>{
-    // Initial load
     loadTasks(false);
-    // Poll every 10 seconds for updates
-    const interval = setInterval(()=>loadTasks(true), 10000);
-    // Also try realtime as bonus
+    const interval=setInterval(()=>loadTasks(true),10000);
     const channel=supabase.channel("tasks-teamview")
       .on("postgres_changes",{event:"*",schema:"public",table:"tasks"},payload=>{
-        if(payload.new&&payload.new.data){
-          setTasks(payload.new.data);
-          setLastUpdated(new Date().toLocaleString());
-          setLiveMsg("🔄 Just updated!");
-          setTimeout(()=>setLiveMsg(""),3000);
-        }
+        if(payload.new&&payload.new.data){setTasks(payload.new.data);setLastUpdated(new Date().toLocaleString());setLiveMsg("🔄 Just updated!");setTimeout(()=>setLiveMsg(""),3000);}
       }).subscribe();
     return()=>{clearInterval(interval);supabase.removeChannel(channel);};
   },[]);
 
+  // Expand multi-day tasks
   const expanded=useMemo(()=>{
     const res=[];
-    const rs=new Date(cur),re=new Date(cur);
-    if(view==="daily"){re.setDate(re.getDate()+1);}
-    else if(view==="weekly"){const ws=sow(cur);rs.setTime(ws.getTime());re.setTime(addD(ws,7).getTime());}
-    else{rs.setDate(1);re.setMonth(re.getMonth()+1);re.setDate(0);re.setDate(re.getDate()+1);}
     tasks.forEach(t=>{
-      const base=new Date(t.date+"T00:00:00");
-      if(t.repeat==="none"){res.push({...t});return;}
-      let c=new Date(base);
-      const lim=new Date(re);lim.setDate(lim.getDate()+1);
-      while(c<=lim){
-        if(c>=rs)res.push({...t,date:fmt(c),_oid:t.id});
-        if(t.repeat==="daily")c=addD(c,1);
-        else if(t.repeat==="weekly")c=addD(c,7);
-        else if(t.repeat==="monthly"){c=new Date(c);c.setMonth(c.getMonth()+1);}
-        else break;
-        if(c>lim)break;
+      const sd=t.date,ed=t.endDate||t.date;
+      if(sd===ed){res.push({...t});return;}
+      let c=new Date(sd+"T00:00:00");
+      const end=new Date(ed+"T00:00:00");
+      while(c<=end){
+        const ds=fmt(c);
+        const isFirst=ds===sd,isLast=ds===ed;
+        res.push({...t,date:ds,_oid:t.id,_isFirst:isFirst,_isLast:isLast,_isMid:!isFirst&&!isLast,
+          _dayStartTime:isFirst?(t.startTime||"07:00"):"07:00",
+          _dayEndTime:isLast?(t.endTime||"19:00"):"19:00"
+        });
+        c=addD(c,1);
       }
     });
     return res;
-  },[tasks,cur,view]);
+  },[tasks]);
 
   const tfd=ds=>expanded.filter(t=>t.date===ds&&(pfilt==="all"||t.priority===pfilt)&&(sfilt==="all"||t.status===sfilt));
 
@@ -128,22 +138,40 @@ function App(){
   const defC=tasks.filter(t=>t.status==="deferred").length;
   const rate=tasks.length?Math.round((doneC/tasks.length)*100):0;
 
+  function DurationBadge({t}){
+    const src=t._oid?tasks.find(x=>x.id===t._oid):t;
+    const dur=src?calcDuration(src.date,src.startTime,src.endDate||src.date,src.endTime):null;
+    const isMulti=src&&src.date!==(src.endDate||src.date);
+    if(!dur&&!t.startTime)return null;
+    return(<div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:3}}>
+      {t.startTime&&<span style={{fontSize:9,color:"#3b82f6",background:"#3b82f622",borderRadius:10,padding:"1px 6px",fontWeight:700}}>
+        🕐 {fmtTime(t._dayStartTime||t.startTime)}–{fmtTime(t._dayEndTime||t.endTime)}
+      </span>}
+      {dur&&<span style={{fontSize:9,color:"#8b5cf6",background:"#8b5cf622",borderRadius:10,padding:"1px 6px",fontWeight:700}}>⏱ {dur.label}</span>}
+      {isMulti&&t._isFirst&&<span style={{fontSize:9,color:"#ec4899",background:"#ec489922",borderRadius:10,padding:"1px 6px",fontWeight:700}}>📅 → {fmtDateShort(src.endDate)}</span>}
+    </div>);
+  }
+
   function TaskDetail({t,onClose}){
     const s=SM[t.status]||SM.pending;
+    const src=t._oid?tasks.find(x=>x.id===t._oid):t;
+    const dur=src?calcDuration(src.date,src.startTime,src.endDate||src.date,src.endTime):null;
+    const isMulti=src&&src.date!==(src.endDate||src.date);
     return(<div style={{position:"fixed",inset:0,background:"#00000090",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100,padding:16}} onClick={onClose}>
-      <div style={{background:"#0f172a",border:`1px solid ${s.color}44`,borderLeft:`4px solid ${s.color}`,borderRadius:16,padding:24,width:"100%",maxWidth:400,boxShadow:"0 25px 60px #0008"}} onClick={e=>e.stopPropagation()}>
+      <div style={{background:"#0f172a",border:`1px solid ${s.color}44`,borderLeft:`4px solid ${s.color}`,borderRadius:16,padding:24,width:"100%",maxWidth:420,boxShadow:"0 25px 60px #0008"}} onClick={e=>e.stopPropagation()}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
-          <h2 style={{fontWeight:800,fontSize:17,color:"#e2e8f0",flex:1,paddingRight:12}}>{t.title}</h2>
+          <h2 style={{fontWeight:800,fontSize:17,color:"#e2e8f0",flex:1,paddingRight:12}}>{t.title}{t._isMid?" (continued)":""}</h2>
           <button onClick={onClose} style={{background:"none",border:"none",color:"#64748b",fontSize:20,cursor:"pointer",lineHeight:1}}>✕</button>
         </div>
         <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
           <span style={{background:s.bg,color:s.color,borderRadius:20,padding:"3px 10px",fontSize:12,fontWeight:700}}>{s.icon} {s.label}</span>
           <span style={{background:PC[t.priority]+"22",color:PC[t.priority],borderRadius:20,padding:"3px 10px",fontSize:12,fontWeight:700}}>{t.priority} Priority</span>
-          {t.repeat!=="none"&&<span style={{background:"#6366f122",color:"#6366f1",borderRadius:20,padding:"3px 10px",fontSize:12,fontWeight:700}}>🔁 {t.repeat}</span>}
+          {dur&&<span style={{background:"#8b5cf622",color:"#8b5cf6",borderRadius:20,padding:"3px 10px",fontSize:12,fontWeight:700}}>⏱ {dur.label}</span>}
         </div>
         <div style={{background:"#1e293b",borderRadius:10,padding:12,marginBottom:12,display:"flex",flexDirection:"column",gap:7}}>
-          <div style={{display:"flex",gap:8,fontSize:13}}><span style={{color:"#64748b",minWidth:90}}>📅 Deadline</span><span style={{color:"#e2e8f0",fontWeight:600}}>{t.date}</span></div>
-          {t.completedAt&&<div style={{display:"flex",gap:8,fontSize:13}}><span style={{color:"#64748b",minWidth:90}}>✅ Completed</span><span style={{color:"#10b981",fontWeight:600}}>{new Date(t.completedAt).toLocaleString()}</span></div>}
+          {src&&src.startTime&&<div style={{display:"flex",gap:8,fontSize:13}}><span style={{color:"#64748b",minWidth:90}}>▶ Start</span><span style={{color:"#e2e8f0",fontWeight:600}}>{fmtDateShort(src.date)} at {fmtTime(src.startTime)}</span></div>}
+          {src&&src.endTime&&<div style={{display:"flex",gap:8,fontSize:13}}><span style={{color:"#64748b",minWidth:90}}>⏹ Finish</span><span style={{color:"#e2e8f0",fontWeight:600}}>{fmtDateShort(src.endDate||src.date)} at {fmtTime(src.endTime)}</span></div>}
+          {t.completedAt&&<div style={{display:"flex",gap:8,fontSize:13}}><span style={{color:"#64748b",minWidth:90}}>✅ Done</span><span style={{color:"#10b981",fontWeight:600}}>{new Date(t.completedAt).toLocaleString()}</span></div>}
           {t.notes&&<div style={{display:"flex",gap:8,fontSize:13}}><span style={{color:"#64748b",minWidth:90}}>📝 Notes</span><span style={{color:"#e2e8f0"}}>{t.notes}</span></div>}
         </div>
         {(t.status==="missed"||t.status==="deferred")&&t.reason&&(
@@ -170,14 +198,14 @@ function App(){
           const ds=fmt(date),ts=tfd(ds),isT=ds===fmt(tod);
           const hasMiss=ts.some(t=>t.status==="missed"),hasDone=ts.some(t=>t.status==="completed");
           return(<div key={ds} onClick={()=>{setCur(new Date(ds+"T00:00:00"));setView("daily");}} style={{minHeight:78,background:"#0f172a",border:isT?"2px solid #6366f1":"1px solid #1e293b",borderRadius:9,padding:5,cursor:"pointer"}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2}}>
-              <div style={{display:"flex",alignItems:"center",gap:3}}>
-                <span style={{fontWeight:isT?700:400,color:isT?"#6366f1":"#cbd5e1",fontSize:12}}>{date.getDate()}</span>
-                {hasMiss&&<span style={{width:5,height:5,borderRadius:"50%",background:"#ef4444",display:"inline-block"}}/>}
-                {hasDone&&<span style={{width:5,height:5,borderRadius:"50%",background:"#10b981",display:"inline-block"}}/>}
-              </div>
+            <div style={{display:"flex",alignItems:"center",gap:3,marginBottom:2}}>
+              <span style={{fontWeight:isT?700:400,color:isT?"#6366f1":"#cbd5e1",fontSize:12}}>{date.getDate()}</span>
+              {hasMiss&&<span style={{width:5,height:5,borderRadius:"50%",background:"#ef4444",display:"inline-block"}}/>}
+              {hasDone&&<span style={{width:5,height:5,borderRadius:"50%",background:"#10b981",display:"inline-block"}}/>}
             </div>
-            {ts.slice(0,3).map(t=><div key={t.id+t.date} onClick={e=>{e.stopPropagation();setShowDetail(t);}} style={{background:t.color+"22",borderLeft:`3px solid ${SM[t.status]?.color||t.color}`,borderRadius:3,padding:"2px 4px",marginBottom:2,fontSize:10,color:"#e2e8f0",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",textDecoration:t.status==="completed"?"line-through":"none",opacity:t.status==="completed"?0.55:1}}>{SM[t.status]?.icon} {t.title}</div>)}
+            {ts.slice(0,3).map(t=><div key={(t._oid||t.id)+t.date} onClick={e=>{e.stopPropagation();setShowDetail(t);}} style={{background:t.color+"22",borderLeft:`3px solid ${SM[t.status]?.color||t.color}`,borderRadius:3,padding:"2px 4px",marginBottom:2,fontSize:10,color:"#e2e8f0",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",textDecoration:t.status==="completed"?"line-through":"none",opacity:t.status==="completed"?0.55:1}}>
+              {SM[t.status]?.icon} {t._dayStartTime?fmtTime(t._dayStartTime)+" ":t.startTime?fmtTime(t.startTime)+" ":""}{t.title}{t._isMid?" ↔":""}
+            </div>)}
             {ts.length>3&&<div style={{fontSize:9,color:"#64748b"}}>+{ts.length-3} more</div>}
           </div>);
         })}
@@ -192,9 +220,10 @@ function App(){
         const ds=fmt(date),ts=tfd(ds),isT=ds===fmt(tod);
         return(<div key={ds} style={{background:"#0f172a",border:isT?"2px solid #6366f1":"1px solid #1e293b",borderRadius:10,padding:8,minHeight:180}}>
           <div style={{textAlign:"center",marginBottom:6}}><div style={{fontSize:10,color:"#64748b",fontWeight:700}}>{DAYS[date.getDay()]}</div><div style={{fontSize:20,fontWeight:700,color:isT?"#6366f1":"#e2e8f0"}}>{date.getDate()}</div></div>
-          {ts.map(t=><div key={t.id+t.date} onClick={()=>setShowDetail(t)} style={{background:t.color+"22",borderLeft:`3px solid ${SM[t.status]?.color||t.color}`,borderRadius:5,padding:"5px 6px",marginBottom:5,cursor:"pointer"}}>
-            <div style={{fontSize:11,fontWeight:600,color:"#e2e8f0",textDecoration:t.status==="completed"?"line-through":"none",opacity:t.status==="completed"?0.6:1,marginBottom:2}}>{SM[t.status]?.icon} {t.title}</div>
-            <div style={{display:"flex",gap:4}}><span style={{fontSize:9,background:SM[t.status]?.bg,color:SM[t.status]?.color,borderRadius:10,padding:"1px 6px",fontWeight:700}}>{SM[t.status]?.label}</span><span style={{fontSize:9,background:PC[t.priority]+"22",color:PC[t.priority],borderRadius:10,padding:"1px 6px",fontWeight:700}}>{t.priority}</span></div>
+          {ts.map(t=><div key={(t._oid||t.id)+t.date} onClick={()=>setShowDetail(t)} style={{background:t.color+"22",borderLeft:`3px solid ${SM[t.status]?.color||t.color}`,borderRadius:5,padding:"5px 6px",marginBottom:5,cursor:"pointer"}}>
+            <div style={{fontSize:11,fontWeight:600,color:"#e2e8f0",textDecoration:t.status==="completed"?"line-through":"none",opacity:t.status==="completed"?0.6:1,marginBottom:2}}>{SM[t.status]?.icon} {t.title}{t._isMid?" ↔":""}</div>
+            <DurationBadge t={t}/>
+            <div style={{display:"flex",gap:4,marginTop:3}}><span style={{fontSize:9,background:SM[t.status]?.bg,color:SM[t.status]?.color,borderRadius:10,padding:"1px 6px",fontWeight:700}}>{SM[t.status]?.label}</span><span style={{fontSize:9,background:PC[t.priority]+"22",color:PC[t.priority],borderRadius:10,padding:"1px 6px",fontWeight:700}}>{t.priority}</span></div>
           </div>)}
         </div>);
       })}
@@ -203,25 +232,50 @@ function App(){
 
   function renderDaily(){
     const ds=fmt(cur),ts=tfd(ds),comp=ts.filter(t=>t.status==="completed").length;
-    return(<div style={{maxWidth:560,margin:"0 auto"}}>
-      {ts.length>0&&<div style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:12,padding:"10px 16px",marginBottom:12,display:"flex",alignItems:"center",gap:12}}>
-        <span style={{fontSize:13,color:"#94a3b8",flexShrink:0}}>Progress</span>
-        <div style={{flex:1,height:8,background:"#1e293b",borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:`${ts.length?Math.round((comp/ts.length)*100):0}%`,background:"linear-gradient(90deg,#6366f1,#10b981)",borderRadius:4,transition:"width .4s"}}/></div>
-        <span style={{fontSize:13,fontWeight:700,color:"#10b981",flexShrink:0}}>{comp}/{ts.length} done</span>
-      </div>}
-      {ts.length===0&&<div style={{textAlign:"center",color:"#475569",padding:36,fontSize:14}}>No tasks for this day.</div>}
-      {ts.map(t=>{const s=SM[t.status]||SM.pending;return(<div key={t.id+t.date} onClick={()=>setShowDetail(t)} style={{background:"#0f172a",border:`1px solid ${s.color}44`,borderLeft:`4px solid ${s.color}`,borderRadius:12,padding:14,marginBottom:10,cursor:"pointer"}}>
-        <div style={{display:"flex",alignItems:"flex-start",gap:10}}>
-          <div style={{flex:1}}>
-            <div style={{fontWeight:700,fontSize:15,color:t.status==="completed"?"#475569":"#e2e8f0",textDecoration:t.status==="completed"?"line-through":"none"}}>{t.title}</div>
-            {t.notes&&<div style={{fontSize:12,color:"#64748b",marginTop:2}}>{t.notes}</div>}
-            {(t.status==="missed"||t.status==="deferred")&&t.reason&&<div style={{fontSize:11,color:s.color,background:s.bg,borderRadius:6,padding:"4px 8px",marginTop:5}}><strong>{t.status==="missed"?"Missed":"Deferred"}:</strong> {t.reason}{t.reasonDetail?` — ${t.reasonDetail}`:""}</div>}
-            {t.completedAt&&<div style={{fontSize:11,color:"#10b981",marginTop:4}}>✅ {new Date(t.completedAt).toLocaleString()}</div>}
-            <div style={{display:"flex",gap:4,marginTop:6}}><span style={{fontSize:10,background:s.bg,color:s.color,borderRadius:20,padding:"2px 8px",fontWeight:700}}>{s.icon} {s.label}</span>{t.repeat!=="none"&&<span style={{fontSize:10,color:"#6366f1",background:"#6366f122",borderRadius:10,padding:"2px 7px"}}>🔁 {t.repeat}</span>}</div>
+    const hasTimeBlocks=ts.some(t=>t.startTime||t._dayStartTime);
+    return(<div style={{maxWidth:700,margin:"0 auto",display:"flex",gap:14,flexWrap:"wrap"}}>
+      <div style={{flex:"1 1 300px",minWidth:0}}>
+        {ts.length>0&&<div style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:12,padding:"10px 16px",marginBottom:12,display:"flex",alignItems:"center",gap:12}}>
+          <span style={{fontSize:13,color:"#94a3b8",flexShrink:0}}>Progress</span>
+          <div style={{flex:1,height:8,background:"#1e293b",borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:`${ts.length?Math.round((comp/ts.length)*100):0}%`,background:"linear-gradient(90deg,#6366f1,#10b981)",borderRadius:4,transition:"width .4s"}}/></div>
+          <span style={{fontSize:13,fontWeight:700,color:"#10b981",flexShrink:0}}>{comp}/{ts.length} done</span>
+        </div>}
+        {ts.length===0&&<div style={{textAlign:"center",color:"#475569",padding:36,fontSize:14}}>No tasks for this day.</div>}
+        {ts.map(t=>{const s=SM[t.status]||SM.pending;return(<div key={(t._oid||t.id)+t.date} onClick={()=>setShowDetail(t)} style={{background:"#0f172a",border:`1px solid ${s.color}44`,borderLeft:`4px solid ${s.color}`,borderRadius:12,padding:14,marginBottom:10,cursor:"pointer"}}>
+          <div style={{display:"flex",alignItems:"flex-start",gap:10}}>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:700,fontSize:15,color:t.status==="completed"?"#475569":"#e2e8f0",textDecoration:t.status==="completed"?"line-through":"none"}}>{t.title}{t._isMid?" (continued)":""}</div>
+              {t.notes&&<div style={{fontSize:12,color:"#64748b",marginTop:2}}>{t.notes}</div>}
+              <DurationBadge t={t}/>
+              {(t.status==="missed"||t.status==="deferred")&&t.reason&&<div style={{fontSize:11,color:s.color,background:s.bg,borderRadius:6,padding:"4px 8px",marginTop:5}}><strong>{t.status==="missed"?"Missed":"Deferred"}:</strong> {t.reason}{t.reasonDetail?` — ${t.reasonDetail}`:""}</div>}
+              {t.completedAt&&<div style={{fontSize:11,color:"#10b981",marginTop:4}}>✅ {new Date(t.completedAt).toLocaleString()}</div>}
+              <div style={{display:"flex",gap:4,marginTop:6}}><span style={{fontSize:10,background:s.bg,color:s.color,borderRadius:20,padding:"2px 8px",fontWeight:700}}>{s.icon} {s.label}</span></div>
+            </div>
+            <span style={{background:PC[t.priority]+"22",color:PC[t.priority],borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700,flexShrink:0}}>{t.priority}</span>
           </div>
-          <span style={{background:PC[t.priority]+"22",color:PC[t.priority],borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700,flexShrink:0}}>{t.priority}</span>
+        </div>);})}
+      </div>
+      {/* Timeline */}
+      {hasTimeBlocks&&<div style={{flex:"0 0 200px",background:"#0f172a",border:"1px solid #1e293b",borderRadius:12,padding:10}}>
+        <div style={{fontSize:10,color:"#64748b",fontWeight:700,textTransform:"uppercase",marginBottom:8,textAlign:"center"}}>Timeline</div>
+        <div style={{position:"relative",background:"#020617",borderRadius:8,overflow:"hidden"}}>
+          {HOURS.map(hr=><div key={hr} style={{display:"flex",height:36,borderBottom:"1px solid #0f172a"}}>
+            <div style={{width:30,fontSize:8,color:"#475569",fontWeight:600,padding:"2px 3px 0",textAlign:"right",flexShrink:0}}>{hr>12?hr-12:hr}{hr>=12?"p":"a"}</div>
+            <div style={{flex:1,borderLeft:"1px solid #1e293b22"}}/>
+          </div>)}
+          <div style={{position:"absolute",top:0,left:30,right:0,bottom:0}}>
+            {ts.map(t=>{
+              const st=t._dayStartTime||t.startTime,et=t._dayEndTime||t.endTime;
+              const bs=getBlockStyle(st,et,t.color);
+              if(!bs)return null;
+              return(<div key={(t._oid||t.id)+t.date} style={{...bs,border:`1px solid ${t.color}66`,cursor:"pointer"}} onClick={()=>setShowDetail(t)}>
+                <div style={{fontWeight:700,fontSize:8,color:"#fff",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{t.title}</div>
+                <div style={{fontSize:7,color:"#cbd5e1"}}>{fmtTime(st)}–{fmtTime(et)}</div>
+              </div>);
+            })}
+          </div>
         </div>
-      </div>);})}
+      </div>}
     </div>);
   }
 
