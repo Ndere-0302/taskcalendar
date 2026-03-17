@@ -9,13 +9,51 @@
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{background:#020617;color:#e2e8f0;font-family:'Segoe UI',sans-serif}
-  input[type=date]::-webkit-calendar-picker-indicator{filter:invert(1)}
-  input[type=time]::-webkit-calendar-picker-indicator{filter:invert(1)}
-  select option{background:#1e293b}
-  textarea{font-family:'Segoe UI',sans-serif}
-  ::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:#0f172a}::-webkit-scrollbar-thumb{background:#334155;border-radius:3px}
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #020617; color: #e2e8f0; font-family: 'Segoe UI', system-ui, sans-serif; overflow-y: auto; overflow-x: hidden; }
+  input[type=date]::-webkit-calendar-picker-indicator, input[type=time]::-webkit-calendar-picker-indicator { filter: invert(1); cursor: pointer; }
+  select option { background: #1e293b; }
+  textarea { font-family: 'Segoe UI', sans-serif; }
+  
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+  .layout-wrapper { max-width: 1200px; margin: 0 auto; padding: 24px; min-height: 100vh; display: flex; flex-direction: column; }
+  .gradient-text { background: linear-gradient(90deg, #6366f1, #8b5cf6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  
+  .btn-action { transition: 0.2s; opacity: 0.85; }
+  .btn-action:hover { opacity: 1; transform: scale(1.05); }
+
+  .view-toggle-btn { padding: 6px 16px; border-radius: 20px; border: none; font-weight: 700; font-size: 13px; cursor: pointer; text-transform: capitalize; transition: 0.2s; }
+  .view-toggle-btn.active { background: #6366f1; color: #fff; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3); }
+  .view-toggle-btn.inactive { background: #1e293b; color: #94a3b8; }
+  .view-toggle-btn.inactive:hover { background: #334155; color: #e2e8f0; }
+
+  .nav-arrow { background: #1e293b; border: none; color: #e2e8f0; border-radius: 8px; padding: 6px 14px; font-size: 18px; cursor: pointer; transition: 0.2s; display: flex; align-items: center; justify-content: center; }
+  .nav-arrow:hover { background: #334155; }
+
+  .month-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+  .month-day-lbl { text-align: center; font-weight: 700; font-size: 12px; color: #64748b; padding: 0 0 10px; text-transform: uppercase; letter-spacing: 1px; }
+  
+  .week-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; align-items: start; }
+  .week-col { background: #0b1120; border-radius: 14px; border: 1px solid #1e293b; display: flex; flex-direction: column; overflow: hidden; min-height: 300px; }
+  .week-col.is-cur { border-color: #6366f1; box-shadow: 0 0 0 1px #6366f1; }
+  .week-col-header { text-align: center; padding: 12px; border-bottom: 1px solid #1e293b; background: #0f172a; }
+  .week-col-body { padding: 10px; }
+
+  .task-card { background: #0f172a; border-radius: 10px; padding: 12px; margin-bottom: 10px; cursor: pointer; transition: all 0.2s ease; border: 1px solid #1e293b; border-left-width: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+  .task-card:hover { border-color: #334155; box-shadow: 0 8px 20px rgba(0,0,0,0.4); background: #141e33; }
+  
+  .hover-details { max-height: 0; opacity: 0; overflow: hidden; transition: max-height 0.3s ease, opacity 0.3s ease, margin-top 0.3s ease; }
+  .task-card:hover .hover-details { max-height: 400px; opacity: 1; margin-top: 8px; }
+
+  .daily-container { display: flex; gap: 24px; align-items: flex-start; }
+  .daily-tasks { flex: 1; min-width: 0; }
+  .daily-timeline { flex: 0 0 280px; background: #0b1120; border: 1px solid #1e293b; border-radius: 16px; padding: 16px; position: sticky; top: 24px; }
+  
+  .day-badge { padding: 4px 8px; border-radius: 6px; font-size: 10px; font-weight: 800; display: inline-block; margin-top: 6px; }
 </style>
 </head>
 <body>
@@ -41,7 +79,15 @@ const SM={
 const MISS_REASONS=["Unexpected priority","Blocked by dependency","Insufficient time","Resource unavailable","Forgot / overlooked","Personal emergency","Technical issue","Scope changed","Other"];
 
 const tod=new Date(); tod.setHours(0,0,0,0);
-const fmt=d=>d.toISOString().split("T")[0];
+
+// ✨ THE FIX: STRICT LOCAL TIME FORMATTING (NO UTC OFFSET BUGS)
+const fmt = (d) => {
+  const yr = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const da = String(d.getDate()).padStart(2, "0");
+  return `${yr}-${mo}-${da}`;
+};
+
 const sow=d=>{const c=new Date(d);c.setDate(c.getDate()-c.getDay());return c;};
 const addD=(d,n)=>{const c=new Date(d);c.setDate(c.getDate()+n);return c;};
 const isPast=ds=>new Date(ds+"T00:00:00")<tod;
@@ -66,39 +112,53 @@ const getBlockStyle=(startTime,endTime,color)=>{
   const sM=sh*60+sm,eM=eh*60+em,dsM=420,deM=1140,tot=deM-dsM;
   const cs=Math.max(sM,dsM),ce=Math.min(eM,deM);if(ce<=cs)return null;
   const top=((cs-dsM)/tot)*100,height=((ce-cs)/tot)*100;
-  return{position:"absolute",top:top+"%",height:Math.max(height,3)+"%",left:3,right:3,background:color+"33",borderLeft:"3px solid "+color,borderRadius:5,padding:"2px 5px",fontSize:9,color:"#e2e8f0",fontWeight:600,overflow:"hidden",minHeight:14,boxSizing:"border-box"};
+  return{position:"absolute",top:top+"%",height:Math.max(height,3)+"%",left:3,right:3,background:color+"33",borderLeft:"3px solid "+color,borderRadius:5,padding:"4px 6px",fontSize:10,color:"#e2e8f0",fontWeight:600,overflow:"hidden",minHeight:18,boxSizing:"border-box"};
 };
 
 const DEF=[
-  {id:1,title:"Morning standup",date:fmt(tod),startTime:"09:00",endDate:fmt(tod),endTime:"09:30",priority:"High",status:"pending",color:"#6366f1",notes:"",reason:"",reasonDetail:"",completedAt:null},
-  {id:2,title:"Project deep work",date:fmt(tod),startTime:"10:00",endDate:fmt(tod),endTime:"12:30",priority:"Medium",status:"pending",color:"#10b981",notes:"Focus block",reason:"",reasonDetail:"",completedAt:null},
+  {id:1,title:"Morning standup",date:fmt(tod),startTime:"09:00",endDate:fmt(tod),endTime:"09:30",priority:"High",status:"pending",color:"#6366f1",notes:"",reason:"",reasonDetail:"",completedAt:null}
 ];
 
 function App(){
-  const [view,setView]=useState("monthly");
+  const [view,setView]=useState("weekly");
   const [cur,setCur]=useState(new Date(tod));
   const [tasks,setTasks]=useState([]);
-  const [syncing,setSyncing]=useState(false);
+  
+  const [settings,setSettings]=useState({ leaves: [], holidays: [] });
+  const [showConfig,setShowConfig]=useState(false);
+  const [newLeave,setNewLeave]=useState(fmt(tod));
+  const [newHolDate,setNewHolDate]=useState(fmt(tod));
+  const [newHolName,setNewHolName]=useState("");
+
+  const[syncing,setSyncing]=useState(false);
   const [syncMsg,setSyncMsg]=useState("⏳ Connecting...");
   const [showModal,setShowModal]=useState(false);
-  const [showExport,setShowExport]=useState(false);
+  const[showExport,setShowExport]=useState(false);
   const [showReason,setShowReason]=useState(false);
-  const [reasonTask,setReasonTask]=useState(null);
+  const[reasonTask,setReasonTask]=useState(null);
   const [pendingStatus,setPendingStatus]=useState("missed");
   const [reasonData,setReasonData]=useState({reason:"",reasonDetail:""});
   const [editTask,setEditTask]=useState(null);
   const [form,setForm]=useState({title:"",date:fmt(tod),startTime:"",endDate:fmt(tod),endTime:"",priority:"Medium",color:"#6366f1",notes:""});
+  const [formError,setFormError]=useState("");
   const [filter,setFilter]=useState("all");
   const [sfilt,setSfilt]=useState("all");
-  const [expOpts,setExpOpts]=useState({range:"current",format:"pdf",groupBy:"status",includeDone:true,includeNotes:true,includeReasons:true});
+  const[expOpts,setExpOpts]=useState({range:"current",format:"pdf",groupBy:"status",includeDone:true,includeNotes:true,includeReasons:true});
 
   async function loadFromSupabase(){
     try{
-      const{data,error}=await supabase.from("tasks").select("*").eq("id",1).single();
-      if(error){
-        if(error.code==="PGRST116"){await supabase.from("tasks").insert({id:1,data:DEF});setTasks(DEF);}
-        else throw error;
-      }else{setTasks(data.data||DEF);}
+      const{data,error}=await supabase.from("tasks").select("*").in("id",[1,2]);
+      if(error) throw error;
+      
+      const tRow = data.find(r=>r.id===1);
+      const sRow = data.find(r=>r.id===2);
+      
+      if(tRow) setTasks(tRow.data||DEF);
+      else { await supabase.from("tasks").insert({id:1,data:DEF}); setTasks(DEF); }
+      
+      if(sRow) setSettings(sRow.data||{leaves:[],holidays:[]});
+      else setSettings({leaves:[],holidays:[]});
+      
       setSyncMsg("✅ Synced");setTimeout(()=>setSyncMsg(""),2000);
     }catch(e){setSyncMsg("⚠️ Sync error");console.error(e);}
   }
@@ -106,21 +166,23 @@ function App(){
   const saveToSupabase=useCallback(async(newTasks)=>{
     setSyncing(true);setSyncMsg("☁️ Saving...");
     try{
-      const{error}=await supabase.from("tasks").upsert({id:1,data:newTasks,updated_at:new Date().toISOString()});
-      if(error)throw error;setSyncMsg("✅ Saved & synced");setTimeout(()=>setSyncMsg(""),2000);
+      await supabase.from("tasks").upsert({id:1,data:newTasks,updated_at:new Date().toISOString()});
+      setSyncMsg("✅ Saved");setTimeout(()=>setSyncMsg(""),2000);
     }catch(e){setSyncMsg("⚠️ Save failed");console.error(e);}
     finally{setSyncing(false);}
   },[]);
 
-  useEffect(()=>{loadFromSupabase();},[]);
+  const saveSettings=async(newSettings)=>{
+    setSettings(newSettings);
+    setSyncing(true);setSyncMsg("☁️ Saving Config...");
+    try{
+      await supabase.from("tasks").upsert({id:2,data:newSettings,updated_at:new Date().toISOString()});
+      setSyncMsg("✅ Settings Saved");setTimeout(()=>setSyncMsg(""),2000);
+    }catch(e){setSyncMsg("⚠️ Save failed");console.error(e);}
+    finally{setSyncing(false);}
+  };
 
-  useEffect(()=>{
-    const channel=supabase.channel("tasks-changes")
-      .on("postgres_changes",{event:"*",schema:"public",table:"tasks"},payload=>{
-        if(payload.new&&payload.new.data){setTasks(payload.new.data);setSyncMsg("🔄 Updated");setTimeout(()=>setSyncMsg(""),2000);}
-      }).subscribe();
-    return()=>supabase.removeChannel(channel);
-  },[]);
+  useEffect(()=>{loadFromSupabase();},[]);
 
   useEffect(()=>{
     if(tasks.length===0)return;
@@ -131,39 +193,86 @@ function App(){
 
   function updateTasks(nt){setTasks(nt);saveToSupabase(nt);}
 
-  // Expand multi-day tasks into per-day instances
+  // --- DAY LOGIC HELPER (FIXED FOR STRICT LOCAL TIME) ---
+  const getDayInfo = useCallback((ds) => {
+    // Break apart the date string (YYYY-MM-DD) so it generates correctly no matter what timezone the user is in.
+    const [y, m, dNum] = ds.split('-').map(Number);
+    const d = new Date(y, m - 1, dNum);
+
+    if(settings.leaves.includes(ds)) return { isOff: true, label: "🌴 Absent / Leave", color: "#f59e0b", bg: "#f59e0b22" };
+    const hol = settings.holidays.find(h=>h.date===ds);
+    if(hol) return { isOff: true, label: `🎉 ${hol.name}`, color: "#ec4899", bg: "#ec489922" };
+    
+    const dayOfWeek = d.getDay();
+    if(dayOfWeek === 0) return { isOff: true, label: "🛋️ Sunday Weekend", color: "#64748b", bg: "#1e293b" };
+    if(dayOfWeek === 6 && dNum > 7) return { isOff: true, label: "🛋️ Saturday Off", color: "#64748b", bg: "#1e293b" };
+    
+    return { isOff: false, label: "", color: "", bg: "" };
+  }, [settings]);
+
+  // SMART TASK EXPANSION LOGIC
   const expanded=useMemo(()=>{
     const res=[];
     tasks.forEach(t=>{
-      const sd=t.date,ed=t.endDate||t.date;
-      if(sd===ed){res.push({...t});return;}
-      let c=new Date(sd+"T00:00:00");
-      const end=new Date(ed+"T00:00:00");
+      const sd=t.date, ed=t.endDate||t.date;
+      const isSingleDay = sd === ed;
+      
+      if(isSingleDay){
+        res.push({...t, _dayStartTime: t.startTime, _dayEndTime: t.endTime}); 
+        return;
+      }
+      
+      const [sy, sm, sdNum] = sd.split('-').map(Number);
+      let c = new Date(sy, sm - 1, sdNum);
+      
+      const [ey, em, edNum] = ed.split('-').map(Number);
+      const end = new Date(ey, em - 1, edNum);
+      
       while(c<=end){
         const ds=fmt(c);
-        const isFirst=ds===sd,isLast=ds===ed;
-        res.push({...t,date:ds,_oid:t.id,_isFirst:isFirst,_isLast:isLast,_isMid:!isFirst&&!isLast,
-          _dayStartTime:isFirst?(t.startTime||"07:00"):"07:00",
-          _dayEndTime:isLast?(t.endTime||"19:00"):"19:00"
-        });
+        const isFirst=ds===sd, isLast=ds===ed;
+        const dInfo = getDayInfo(ds);
+        
+        // ONLY CREATE TASK ON THIS DAY IF IT IS A WORKING DAY
+        if(!dInfo.isOff) {
+            const isSat = c.getDay() === 6;
+            const defStart = "09:00";
+            const defEnd = isSat ? "16:00" : "17:00"; // Default to 7h on sat, 8h otherwise
+            
+            const actualSt = isFirst ? (t.startTime || defStart) : defStart;
+            const actualEt = isLast ? (t.endTime || defEnd) : defEnd;
+
+            res.push({...t, date: ds, _oid: t.id, _isFirst: isFirst, _isLast: isLast, _isMid: !isFirst && !isLast,
+              _dayStartTime: actualSt,
+              _dayEndTime: actualEt
+            });
+        }
         c=addD(c,1);
       }
     });
     return res;
-  },[tasks]);
+  },[tasks, getDayInfo]);
 
   const tfd=ds=>expanded.filter(t=>t.date===ds&&(filter==="all"||t.priority===filter)&&(sfilt==="all"||t.status===sfilt));
 
-  const openAdd=ds=>{setEditTask(null);setForm({title:"",date:ds,startTime:"",endDate:ds,endTime:"",priority:"Medium",color:"#6366f1",notes:""});setShowModal(true);};
-  const openEdit=t=>{const src=t._oid?tasks.find(x=>x.id===t._oid):t;if(!src)return;setEditTask(src);setForm({title:src.title,date:src.date,startTime:src.startTime||"",endDate:src.endDate||src.date,endTime:src.endTime||"",priority:src.priority,color:src.color,notes:src.notes||""});setShowModal(true);};
+  const openAdd=ds=>{setFormError("");setEditTask(null);setForm({title:"",date:ds,startTime:"",endDate:ds,endTime:"",priority:"Medium",color:"#6366f1",notes:""});setShowModal(true);};
+  const openEdit=t=>{setFormError("");const src=t._oid?tasks.find(x=>x.id===t._oid):t;if(!src)return;setEditTask(src);setForm({title:src.title,date:src.date,startTime:src.startTime||"",endDate:src.endDate||src.date,endTime:src.endTime||"",priority:src.priority,color:src.color,notes:src.notes||""});setShowModal(true);};
 
   function saveTask(){
-    if(!form.title.trim())return;
+    if(!form.title.trim()) { setFormError("Task title is required."); return; }
+    if(form.date > form.endDate) { setFormError("End Date cannot be before Start Date."); return; }
+    const isSingleDayForm = form.date === form.endDate;
+    if(isSingleDayForm && form.startTime && form.endTime && form.startTime >= form.endTime) {
+      setFormError("End Time must be after Start Time on the same day."); return;
+    }
+
     let nt;
-    if(editTask)nt=tasks.map(t=>t.id===editTask.id?{...t,...form}:t);
+    if(editTask) nt=tasks.map(t=>t.id===editTask.id?{...t,...form}:t);
     else nt=[...tasks,{id:Date.now(),...form,status:"pending",reason:"",reasonDetail:"",completedAt:null}];
-    updateTasks(nt);setShowModal(false);
+    updateTasks(nt);
+    setShowModal(false);
   }
+
   function delTask(id){updateTasks(tasks.filter(t=>t.id!==id));setShowModal(false);}
   const markComplete=(t,e)=>{e&&e.stopPropagation();const id=t._oid||t.id;updateTasks(tasks.map(x=>x.id===id?{...x,status:"completed",completedAt:new Date().toISOString(),reason:"",reasonDetail:""}:x));};
   const resetStatus=(t,e)=>{e&&e.stopPropagation();const id=t._oid||t.id;updateTasks(tasks.map(x=>x.id===id?{...x,status:"pending",reason:"",reasonDetail:"",completedAt:null}:x));};
@@ -175,9 +284,15 @@ function App(){
     setShowReason(false);setReasonTask(null);
   }
 
-  function nav(dir){const d=new Date(cur);if(view==="daily")d.setDate(d.getDate()+dir);else if(view==="weekly")d.setDate(d.getDate()+dir*7);else d.setMonth(d.getMonth()+dir);setCur(d);}
+  function nav(dir){
+    const d=new Date(cur);
+    if(view==="daily") d.setDate(d.getDate()+dir);
+    else if(view==="weekly") d.setDate(d.getDate()+dir*7);
+    else d.setMonth(d.getMonth()+dir);
+    setCur(d);
+  }
   const navLabel=()=>{
-    if(view==="daily")return cur.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric"});
+    if(view==="daily") return cur.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric"});
     if(view==="weekly"){const ws=sow(cur),we=addD(ws,6);return`${ws.toLocaleDateString("en-US",{month:"short",day:"numeric"})} – ${we.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}`;}
     return`${MONTHS[cur.getMonth()]} ${cur.getFullYear()}`;
   };
@@ -188,50 +303,63 @@ function App(){
     const realDur=src?calcDuration(src.date,src.startTime,src.endDate||src.date,src.endTime):dur;
     if(!realDur&&!t.startTime)return null;
     const isMulti=src&&src.date!==(src.endDate||src.date);
-    return(<div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:3}}>
-      {t.startTime&&<span style={{fontSize:9,color:"#3b82f6",background:"#3b82f622",borderRadius:10,padding:"1px 6px",fontWeight:700}}>
+    
+    return(<div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
+      {t.startTime&&<span style={{fontSize:10,color:"#3b82f6",background:"#3b82f622",borderRadius:12,padding:"3px 8px",fontWeight:700}}>
         🕐 {fmtTime(t._dayStartTime||t.startTime)}–{fmtTime(t._dayEndTime||t.endTime)}
       </span>}
-      {realDur&&<span style={{fontSize:9,color:"#8b5cf6",background:"#8b5cf622",borderRadius:10,padding:"1px 6px",fontWeight:700}}>⏱ {realDur.label}</span>}
-      {isMulti&&t._isFirst&&<span style={{fontSize:9,color:"#ec4899",background:"#ec489922",borderRadius:10,padding:"1px 6px",fontWeight:700}}>📅 → {fmtDateShort(src.endDate)}</span>}
+      {realDur&&<span style={{fontSize:10,color:"#8b5cf6",background:"#8b5cf622",borderRadius:12,padding:"3px 8px",fontWeight:700}}>
+        ⏱ {realDur.label}
+      </span>}
+      {isMulti&&t._isFirst&&<span style={{fontSize:10,color:"#ec4899",background:"#ec489922",borderRadius:12,padding:"3px 8px",fontWeight:700}}>
+        📅 → {fmtDateShort(src.endDate)}
+      </span>}
     </div>);
   }
 
   function StatusBar({t}){
     const s=SM[t.status];
-    return(<div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:6}}>
-      <span style={{fontSize:10,background:s.bg,color:s.color,borderRadius:20,padding:"2px 8px",fontWeight:700}}>{s.icon} {s.label}</span>
-      {t.status!=="completed"&&<button onClick={e=>markComplete(t,e)} style={{fontSize:10,padding:"2px 8px",borderRadius:20,border:"none",background:"#10b98122",color:"#10b981",fontWeight:700,cursor:"pointer"}}>✅ Done</button>}
-      {t.status!=="missed"&&<button onClick={e=>askReason(t,"missed",e)} style={{fontSize:10,padding:"2px 8px",borderRadius:20,border:"none",background:"#ef444422",color:"#ef4444",fontWeight:700,cursor:"pointer"}}>❌ Missed</button>}
-      {t.status!=="deferred"&&<button onClick={e=>askReason(t,"deferred",e)} style={{fontSize:10,padding:"2px 8px",borderRadius:20,border:"none",background:"#8b5cf622",color:"#8b5cf6",fontWeight:700,cursor:"pointer"}}>🔄 Defer</button>}
-      {t.status!=="pending"&&<button onClick={e=>resetStatus(t,e)} style={{fontSize:10,padding:"2px 8px",borderRadius:20,border:"none",background:"#1e293b",color:"#64748b",fontWeight:700,cursor:"pointer"}}>↩ Reset</button>}
+    return(<div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8,alignItems:"center"}}>
+      <span style={{fontSize:10,background:s.bg,color:s.color,borderRadius:20,padding:"3px 10px",fontWeight:800}}>
+        {s.icon} {s.label}
+      </span>
+      {t.status!=="completed"&&<button className="btn-action" onClick={e=>markComplete(t,e)} style={{fontSize:10,padding:"3px 10px",borderRadius:20,border:"none",background:"#10b98122",color:"#10b981",fontWeight:700,cursor:"pointer"}}>✅ Done</button>}
+      {t.status!=="missed"&&<button className="btn-action" onClick={e=>askReason(t,"missed",e)} style={{fontSize:10,padding:"3px 10px",borderRadius:20,border:"none",background:"#ef444422",color:"#ef4444",fontWeight:700,cursor:"pointer"}}>❌ Missed</button>}
+      {t.status!=="deferred"&&<button className="btn-action" onClick={e=>askReason(t,"deferred",e)} style={{fontSize:10,padding:"3px 10px",borderRadius:20,border:"none",background:"#8b5cf622",color:"#8b5cf6",fontWeight:700,cursor:"pointer"}}>🔄 Defer</button>}
+      {t.status!=="pending"&&<button className="btn-action" onClick={e=>resetStatus(t,e)} style={{fontSize:10,padding:"3px 10px",borderRadius:20,border:"none",background:"#1e293b",color:"#64748b",fontWeight:700,cursor:"pointer"}}>↩ Reset</button>}
     </div>);
   }
 
+  // --- VIEWS ---
   function renderMonthly(){
     const yr=cur.getFullYear(),mo=cur.getMonth();
     const fd=new Date(yr,mo,1).getDay(),dim=new Date(yr,mo+1,0).getDate();
     const cells=[];for(let i=0;i<fd;i++)cells.push(null);for(let d=1;d<=dim;d++)cells.push(new Date(yr,mo,d));
     return(<div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,marginBottom:4}}>{DAYS.map(d=><div key={d} style={{textAlign:"center",fontWeight:700,fontSize:11,color:"#94a3b8",padding:"5px 0"}}>{d}</div>)}</div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3}}>
+      <div className="month-grid">{DAYS.map(d=><div key={d} className="month-day-lbl">{d}</div>)}</div>
+      <div className="month-grid">
         {cells.map((date,i)=>{
           if(!date)return<div key={i}/>;
           const ds=fmt(date),ts=tfd(ds),isT=ds===fmt(tod);
           const hasMiss=ts.some(t=>t.status==="missed"),hasDone=ts.some(t=>t.status==="completed");
-          return(<div key={ds} onClick={()=>{setCur(new Date(ds+"T00:00:00"));setView("daily");}} style={{minHeight:78,background:"#0f172a",border:isT?"2px solid #6366f1":"1px solid #1e293b",borderRadius:9,padding:5,cursor:"pointer"}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2}}>
-              <div style={{display:"flex",alignItems:"center",gap:3}}>
-                <span style={{fontWeight:isT?700:400,color:isT?"#6366f1":"#cbd5e1",fontSize:12}}>{date.getDate()}</span>
-                {hasMiss&&<span style={{width:5,height:5,borderRadius:"50%",background:"#ef4444",display:"inline-block"}}/>}
-                {hasDone&&<span style={{width:5,height:5,borderRadius:"50%",background:"#10b981",display:"inline-block"}}/>}
+          const dInfo = getDayInfo(ds);
+          
+          return(<div key={ds} onClick={()=>{setCur(new Date(ds+"T00:00:00"));setView("daily");}} style={{minHeight:100,background:dInfo.isOff?"#050811":"#0b1120",border:isT?"2px solid #6366f1":"1px solid #1e293b",borderRadius:12,padding:8,cursor:"pointer",transition:"0.2s"}} className="btn-action">
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+              <div style={{display:"flex",alignItems:"center",gap:4}}>
+                <span style={{fontWeight:isT?800:600,color:isT?"#6366f1":(dInfo.isOff?"#475569":"#cbd5e1"),fontSize:14}}>{date.getDate()}</span>
+                {hasMiss&&<span style={{width:6,height:6,borderRadius:"50%",background:"#ef4444",display:"inline-block"}}/>}
+                {hasDone&&<span style={{width:6,height:6,borderRadius:"50%",background:"#10b981",display:"inline-block"}}/>}
               </div>
-              <button onClick={e=>{e.stopPropagation();openAdd(ds);}} style={{background:"none",border:"none",color:"#6366f1",fontSize:15,cursor:"pointer",lineHeight:1,padding:0}}>+</button>
+              {!dInfo.isOff && <button onClick={e=>{e.stopPropagation();openAdd(ds);}} style={{background:"none",border:"none",color:"#64748b",fontSize:16,cursor:"pointer",lineHeight:1,padding:0}} className="btn-action">+</button>}
             </div>
-            {ts.slice(0,3).map(t=><div key={(t._oid||t.id)+t.date} onClick={e=>{e.stopPropagation();openEdit(t);}} style={{background:t.color+"22",borderLeft:`3px solid ${SM[t.status].color}`,borderRadius:3,padding:"2px 4px",marginBottom:2,fontSize:10,color:"#e2e8f0",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",textDecoration:t.status==="completed"?"line-through":"none",opacity:t.status==="completed"?0.55:1}}>
-              {SM[t.status].icon} {t._dayStartTime?fmtTime(t._dayStartTime)+" ":t.startTime?fmtTime(t.startTime)+" ":""}{t.title}{t._isMid?" (cont.)":""}
+            
+            {dInfo.isOff && <div className="day-badge" style={{background:dInfo.bg, color:dInfo.color, marginBottom:6}}>{dInfo.label}</div>}
+
+            {ts.slice(0,4).map(t=><div key={(t._oid||t.id)+t.date} onClick={e=>{e.stopPropagation();openEdit(t);}} style={{background:t.color+"22",borderLeft:`3px solid ${SM[t.status].color}`,borderRadius:4,padding:"3px 6px",marginBottom:4,fontSize:11,color:"#e2e8f0",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",textDecoration:t.status==="completed"?"line-through":"none",opacity:t.status==="completed"?0.55:1,fontWeight:600}}>
+              {t.title}{t._isMid?" (cont.)":""}
             </div>)}
-            {ts.length>3&&<div style={{fontSize:9,color:"#64748b"}}>+{ts.length-3} more</div>}
+            {ts.length>4&&<div style={{fontSize:10,color:"#64748b",fontWeight:700,textAlign:"center",marginTop:4}}>+{ts.length-4} more tasks</div>}
           </div>);
         })}
       </div>
@@ -240,17 +368,31 @@ function App(){
 
   function renderWeekly(){
     const ws=sow(cur),days=Array.from({length:7},(_,i)=>addD(ws,i));
-    return(<div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:5}}>
+    return(<div className="week-grid">
       {days.map(date=>{
         const ds=fmt(date),ts=tfd(ds),isT=ds===fmt(tod);
-        return(<div key={ds} style={{background:"#0f172a",border:isT?"2px solid #6366f1":"1px solid #1e293b",borderRadius:10,padding:8,minHeight:180}}>
-          <div style={{textAlign:"center",marginBottom:6}}><div style={{fontSize:10,color:"#64748b",fontWeight:700}}>{DAYS[date.getDay()]}</div><div style={{fontSize:20,fontWeight:700,color:isT?"#6366f1":"#e2e8f0"}}>{date.getDate()}</div></div>
-          {ts.map(t=><div key={(t._oid||t.id)+t.date} style={{background:t.color+"22",borderLeft:`3px solid ${SM[t.status].color}`,borderRadius:5,padding:"5px 6px",marginBottom:5}}>
-            <div style={{fontSize:11,fontWeight:600,color:"#e2e8f0",textDecoration:t.status==="completed"?"line-through":"none",opacity:t.status==="completed"?0.6:1,cursor:"pointer",marginBottom:2}} onClick={()=>openEdit(t)}>{t.title}{t._isMid?" (cont.)":""}</div>
-            <DurationBadge t={t}/>
-            <StatusBar t={t}/>
-          </div>)}
-          <button onClick={()=>openAdd(ds)} style={{width:"100%",marginTop:3,background:"none",border:"1px dashed #334155",borderRadius:5,color:"#475569",fontSize:10,padding:"3px 0",cursor:"pointer"}}>+ Add</button>
+        const dInfo = getDayInfo(ds);
+
+        return(<div key={ds} className={`week-col ${isT?'is-cur':''}`} style={{background:dInfo.isOff?"#050811":"#0b1120"}}>
+          <div className="week-col-header" onClick={()=>{setCur(new Date(ds+"T00:00:00"));setView("daily");}} style={{cursor:"pointer", background:dInfo.isOff?"transparent":"#0f172a"}}>
+            <div style={{fontSize:12,color:dInfo.isOff?"#475569":"#94a3b8",fontWeight:800,textTransform:"uppercase",letterSpacing:1}}>{DAYS[date.getDay()]}</div>
+            <div style={{fontSize:24,fontWeight:800,color:isT?"#6366f1":(dInfo.isOff?"#475569":"#e2e8f0"),marginTop:2}}>{date.getDate()}</div>
+            {dInfo.isOff && <div className="day-badge" style={{background:dInfo.bg, color:dInfo.color, marginTop:8}}>{dInfo.label}</div>}
+          </div>
+          <div className="week-col-body">
+            {ts.map(t=>(
+              <div key={(t._oid||t.id)+t.date} className="task-card" style={{borderLeftColor: SM[t.status].color}} onClick={()=>openEdit(t)}>
+                <div style={{fontSize:13,fontWeight:700,color:"#e2e8f0",textDecoration:t.status==="completed"?"line-through":"none",opacity:t.status==="completed"?0.6:1,lineHeight:1.4}}>
+                  {t.title}{t._isMid?" (cont.)":""}
+                </div>
+                <div className="hover-details">
+                  <DurationBadge t={t}/>
+                  <StatusBar t={t}/>
+                </div>
+              </div>
+            ))}
+            {!dInfo.isOff && <button onClick={()=>openAdd(ds)} style={{width:"100%",marginTop:6,background:"transparent",border:"2px dashed #334155",borderRadius:8,color:"#64748b",fontSize:13,fontWeight:800,padding:"8px 0",cursor:"pointer"}} className="btn-action">+ Add</button>}
+          </div>
         </div>);
       })}
     </div>);
@@ -259,46 +401,64 @@ function App(){
   function renderDaily(){
     const ds=fmt(cur),ts=tfd(ds),comp=ts.filter(t=>t.status==="completed").length;
     const hasTimeBlocks=ts.some(t=>t.startTime||t._dayStartTime);
-    return(<div style={{maxWidth:700,margin:"0 auto",display:"flex",gap:14,flexWrap:"wrap"}}>
-      {/* Task list */}
-      <div style={{flex:"1 1 300px",minWidth:0}}>
-        {ts.length>0&&<div style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:12,padding:"10px 16px",marginBottom:12,display:"flex",alignItems:"center",gap:12}}>
-          <span style={{fontSize:13,color:"#94a3b8",flexShrink:0}}>Progress</span>
-          <div style={{flex:1,height:8,background:"#1e293b",borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:`${ts.length?Math.round((comp/ts.length)*100):0}%`,background:"linear-gradient(90deg,#6366f1,#10b981)",borderRadius:4,transition:"width .4s"}}/></div>
-          <span style={{fontSize:13,fontWeight:700,color:"#10b981",flexShrink:0}}>{comp}/{ts.length} done</span>
-        </div>}
-        {ts.length===0&&<div style={{textAlign:"center",color:"#475569",padding:36,fontSize:14}}>No tasks. Click + to add one!</div>}
-        {ts.map(t=>{const s=SM[t.status];return(<div key={(t._oid||t.id)+t.date} style={{background:"#0f172a",border:`1px solid ${s.color}44`,borderLeft:`4px solid ${s.color}`,borderRadius:12,padding:14,marginBottom:10}}>
-          <div style={{display:"flex",alignItems:"flex-start",gap:10}}>
-            <div style={{flex:1}}>
-              <div style={{fontWeight:700,fontSize:15,color:t.status==="completed"?"#475569":"#e2e8f0",textDecoration:t.status==="completed"?"line-through":"none",cursor:"pointer"}} onClick={()=>openEdit(t)}>{t.title}{t._isMid?" (continued)":""}</div>
-              {t.notes&&<div style={{fontSize:12,color:"#64748b",marginTop:2}}>{t.notes}</div>}
-              <DurationBadge t={t}/>
-              {(t.status==="missed"||t.status==="deferred")&&t.reason&&<div style={{fontSize:11,color:s.color,background:s.bg,borderRadius:6,padding:"4px 8px",marginTop:5}}><strong>{t.status==="missed"?"Missed":"Deferred"}:</strong> {t.reason}{t.reasonDetail?` — ${t.reasonDetail}`:""}</div>}
-              {t.completedAt&&<div style={{fontSize:11,color:"#10b981",marginTop:4}}>✅ {new Date(t.completedAt).toLocaleString()}</div>}
-              <StatusBar t={t}/>
-            </div>
-            <span style={{background:PC[t.priority]+"22",color:PC[t.priority],borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700,flexShrink:0}}>{t.priority}</span>
+    const dInfo = getDayInfo(ds);
+
+    return(<div className="daily-container">
+      <div className="daily-tasks">
+        
+        {/* NON-WORKING DAY BANNER */}
+        {dInfo.isOff && <div style={{background:dInfo.bg, border:`1px solid ${dInfo.color}55`, borderRadius:14, padding:"20px", marginBottom:20, display:"flex", alignItems:"center", gap:16}}>
+          <div style={{fontSize:30}}>{dInfo.label.split(' ')[0]}</div>
+          <div>
+            <div style={{fontSize:18, fontWeight:800, color:dInfo.color}}>{dInfo.label.replace(/^[^a-zA-Z]+/,'')}</div>
+            <div style={{fontSize:13, color:"#94a3b8", marginTop:4}}>Take a break! No new tasks should be scheduled today.</div>
           </div>
-        </div>);})}
-        <button onClick={()=>openAdd(ds)} style={{width:"100%",padding:"11px 0",background:"#1e293b",border:"2px dashed #334155",borderRadius:12,color:"#6366f1",fontWeight:700,fontSize:14,cursor:"pointer",marginTop:2}}>+ Add Task</button>
+        </div>}
+
+        {ts.length>0&&<div style={{background:"#0b1120",border:"1px solid #1e293b",borderRadius:14,padding:"16px 20px",marginBottom:20,display:"flex",alignItems:"center",gap:16}}>
+          <span style={{fontSize:14,fontWeight:700,color:"#94a3b8",flexShrink:0}}>Daily Progress</span>
+          <div style={{flex:1,height:12,background:"#1e293b",borderRadius:6,overflow:"hidden"}}><div style={{height:"100%",width:`${ts.length?Math.round((comp/ts.length)*100):0}%`,background:"linear-gradient(90deg,#6366f1,#10b981)",borderRadius:6,transition:"width .4s"}}/></div>
+          <span style={{fontSize:15,fontWeight:800,color:"#10b981",flexShrink:0}}>{comp}/{ts.length} Done</span>
+        </div>}
+        
+        {ts.length===0 && !dInfo.isOff && <div style={{textAlign:"center",color:"#64748b",padding:48,fontSize:16,background:"#0b1120",borderRadius:16,border:"1px dashed #334155"}}>No tasks planned. Enjoy your day or add a new task!</div>}
+        
+        {ts.map(t=>{const s=SM[t.status];return(
+          <div key={(t._oid||t.id)+t.date} className="task-card" style={{borderLeftColor:s.color,padding:16}} onClick={()=>openEdit(t)}>
+            <div style={{display:"flex",alignItems:"flex-start",gap:12}}>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:800,fontSize:16,color:t.status==="completed"?"#64748b":"#e2e8f0",textDecoration:t.status==="completed"?"line-through":"none"}}>{t.title}{t._isMid?" (continued)":""}</div>
+                <div className="hover-details">
+                  {t.notes&&<div style={{fontSize:13,color:"#94a3b8",marginTop:4}}>{t.notes}</div>}
+                  <DurationBadge t={t}/>
+                  {(t.status==="missed"||t.status==="deferred")&&t.reason&&<div style={{fontSize:12,color:s.color,background:s.bg,borderRadius:8,padding:"6px 12px",marginTop:8}}><strong>{t.status==="missed"?"Missed":"Deferred"}:</strong> {t.reason}{t.reasonDetail?` — ${t.reasonDetail}`:""}</div>}
+                  {t.completedAt&&<div style={{fontSize:12,color:"#10b981",marginTop:6,fontWeight:700}}>✅ Completed: {new Date(t.completedAt).toLocaleTimeString()}</div>}
+                  <StatusBar t={t}/>
+                </div>
+              </div>
+              <span style={{background:PC[t.priority]+"22",color:PC[t.priority],borderRadius:20,padding:"4px 12px",fontSize:11,fontWeight:800,flexShrink:0}}>{t.priority}</span>
+            </div>
+          </div>
+        );})}
+        {!dInfo.isOff && <button onClick={()=>openAdd(ds)} style={{width:"100%",padding:"14px 0",background:"transparent",border:"2px dashed #334155",borderRadius:12,color:"#6366f1",fontWeight:800,fontSize:15,cursor:"pointer",marginTop:8}} className="btn-action">+ Add New Task Here</button>}
       </div>
+      
       {/* Timeline */}
-      {hasTimeBlocks&&<div style={{flex:"0 0 200px",background:"#0f172a",border:"1px solid #1e293b",borderRadius:12,padding:10}}>
-        <div style={{fontSize:10,color:"#64748b",fontWeight:700,textTransform:"uppercase",marginBottom:8,textAlign:"center"}}>Timeline</div>
-        <div style={{position:"relative",background:"#020617",borderRadius:8,overflow:"hidden"}}>
-          {HOURS.map(hr=><div key={hr} style={{display:"flex",height:36,borderBottom:"1px solid #0f172a"}}>
-            <div style={{width:30,fontSize:8,color:"#475569",fontWeight:600,padding:"2px 3px 0",textAlign:"right",flexShrink:0}}>{hr>12?hr-12:hr}{hr>=12?"p":"a"}</div>
-            <div style={{flex:1,borderLeft:"1px solid #1e293b22"}}/>
+      {hasTimeBlocks&&<div className="daily-timeline">
+        <div style={{fontSize:12,color:"#94a3b8",fontWeight:800,textTransform:"uppercase",marginBottom:16,letterSpacing:1,textAlign:"center"}}>🕒 Time Blocks</div>
+        <div style={{position:"relative",background:"#020617",borderRadius:12,overflow:"hidden",border:"1px solid #1e293b"}}>
+          {HOURS.map(hr=><div key={hr} style={{display:"flex",height:45,borderBottom:"1px solid #1e293b"}}>
+            <div style={{width:45,fontSize:10,color:"#64748b",fontWeight:700,padding:"4px 6px 0",textAlign:"right",flexShrink:0}}>{hr>12?hr-12:hr} {hr>=12?"PM":"AM"}</div>
+            <div style={{flex:1,borderLeft:"1px solid #1e293b"}}/>
           </div>)}
-          <div style={{position:"absolute",top:0,left:30,right:0,bottom:0}}>
+          <div style={{position:"absolute",top:0,left:45,right:0,bottom:0}}>
             {ts.map(t=>{
               const st=t._dayStartTime||t.startTime,et=t._dayEndTime||t.endTime;
               const bs=getBlockStyle(st,et,t.color);
               if(!bs)return null;
-              return(<div key={(t._oid||t.id)+t.date} style={{...bs,border:`1px solid ${t.color}66`,cursor:"pointer"}} onClick={()=>openEdit(t)}>
-                <div style={{fontWeight:700,fontSize:8,color:"#fff",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{t.title}</div>
-                <div style={{fontSize:7,color:"#cbd5e1"}}>{fmtTime(st)}–{fmtTime(et)}</div>
+              return(<div key={(t._oid||t.id)+t.date} style={{...bs,border:`1px solid ${t.color}88`,cursor:"pointer"}} onClick={()=>openEdit(t)} className="btn-action">
+                <div style={{fontWeight:800,fontSize:11,color:"#fff",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{t.title}</div>
+                <div style={{fontSize:9,color:"#cbd5e1",marginTop:2,fontWeight:600}}>{fmtTime(st)}–{fmtTime(et)}</div>
               </div>);
             })}
           </div>
@@ -307,10 +467,10 @@ function App(){
     </div>);
   }
 
-  // ── EXPORT ──
+  // EXPORT LOGIC
   function getExpTasks(){
     let src=[...tasks];if(!expOpts.includeDone)src=src.filter(t=>t.status!=="completed");
-    const n=new Date(tod);let s,e;
+    const n=new Date(cur);let s,e;
     if(expOpts.range==="today"){s=e=fmt(n);}
     else if(expOpts.range==="week"){const ws=sow(n);s=fmt(ws);e=fmt(addD(ws,6));}
     else if(expOpts.range==="month"){s=fmt(new Date(n.getFullYear(),n.getMonth(),1));e=fmt(new Date(n.getFullYear(),n.getMonth()+1,0));}
@@ -346,120 +506,200 @@ function App(){
 
   const doneC=tasks.filter(t=>t.status==="completed").length;
   const missC=tasks.filter(t=>t.status==="missed").length;
-  const inp={width:"100%",boxSizing:"border-box",padding:"9px 13px",background:"#1e293b",border:"1px solid #334155",borderRadius:9,color:"#e2e8f0",fontSize:14,outline:"none",marginTop:4,marginBottom:12};
+  const inp={width:"100%",boxSizing:"border-box",padding:"10px 14px",background:"#1e293b",border:"1px solid #334155",borderRadius:10,color:"#e2e8f0",fontSize:14,outline:"none",marginTop:4,marginBottom:14};
 
-  return(<div style={{minHeight:"100vh",background:"#020617",color:"#e2e8f0",fontFamily:"'Segoe UI',sans-serif",padding:"16px"}}>
-  <div style={{maxWidth:1050,margin:"0 auto"}}>
-    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
+  return(
+  <div className="layout-wrapper">
+    {/* HEADER AREA */}
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:24,flexWrap:"wrap",gap:16,background:"#0b1120",padding:"16px 24px",borderRadius:16,border:"1px solid #1e293b"}}>
       <div>
-        <h1 style={{margin:0,fontSize:22,fontWeight:800,background:"linear-gradient(90deg,#6366f1,#8b5cf6)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>📋 TaskCalendar</h1>
-        <div style={{fontSize:12,color:"#475569",marginTop:2}}>
+        <h1 style={{margin:0,fontSize:26,fontWeight:800}} className="gradient-text">📋 TaskCalendar</h1>
+        <div style={{fontSize:13,color:"#64748b",marginTop:4,fontWeight:600}}>
           <span style={{color:"#10b981"}}>✅ {doneC} done</span>&nbsp;·&nbsp;<span style={{color:"#ef4444"}}>❌ {missC} missed</span>&nbsp;·&nbsp;<span>{tasks.length} total</span>
-          {syncMsg&&<span style={{marginLeft:10,color:syncMsg.includes("✅")?"#10b981":syncMsg.includes("⚠")?"#ef4444":"#6366f1"}}>{syncMsg}</span>}
+          {syncMsg&&<span style={{marginLeft:12,color:syncMsg.includes("✅")?"#10b981":syncMsg.includes("⚠")?"#ef4444":"#6366f1"}}>{syncMsg}</span>}
         </div>
       </div>
-      <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-        {["daily","weekly","monthly"].map(v=><button key={v} onClick={()=>setView(v)} style={{padding:"6px 14px",borderRadius:20,border:"none",background:view===v?"#6366f1":"#1e293b",color:view===v?"#fff":"#94a3b8",fontWeight:700,fontSize:12,cursor:"pointer",textTransform:"capitalize"}}>{v}</button>)}
-        <button onClick={()=>setShowExport(true)} style={{padding:"6px 14px",borderRadius:20,border:"none",background:"linear-gradient(135deg,#10b981,#059669)",color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}}>⬇ Export</button>
+      
+      <div style={{display:"flex",gap:8,background:"#020617",padding:6,borderRadius:24,border:"1px solid #1e293b"}}>
+        {["daily","weekly","monthly"].map(v=>
+          <button key={v} onClick={()=>setView(v)} className={`view-toggle-btn ${view===v ? 'active' : 'inactive'}`}>{v}</button>
+        )}
+      </div>
+
+      <div style={{display:"flex",gap:10}}>
+        <button onClick={()=>setShowConfig(true)} style={{padding:"8px 16px",borderRadius:10,border:"1px solid #334155",background:"#1e293b",color:"#e2e8f0",fontWeight:800,fontSize:14,cursor:"pointer"}} className="btn-action">⚙️ Settings</button>
+        <button onClick={()=>setShowExport(true)} style={{padding:"8px 16px",borderRadius:10,border:"1px solid #059669",background:"#10b98122",color:"#10b981",fontWeight:800,fontSize:14,cursor:"pointer"}} className="btn-action">⬇ Export</button>
       </div>
     </div>
-    <div style={{display:"flex",gap:4,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
-      {["all","High","Medium","Low"].map(p=><button key={p} onClick={()=>setFilter(p)} style={{padding:"3px 10px",borderRadius:20,border:"none",fontSize:11,fontWeight:600,cursor:"pointer",background:filter===p?(p==="all"?"#334155":PC[p]+"33"):"#0f172a",color:filter===p?(p==="all"?"#e2e8f0":PC[p]):"#475569",outline:filter===p?`1px solid ${p==="all"?"#334155":PC[p]}`:"none"}}>{p==="all"?"All Priority":p}</button>)}
-      <div style={{width:1,height:16,background:"#1e293b",margin:"0 2px"}}/>
-      {["all","pending","completed","missed","deferred"].map(s=>{const m=SM[s]||{};return(<button key={s} onClick={()=>setSfilt(s)} style={{padding:"3px 10px",borderRadius:20,border:"none",fontSize:11,fontWeight:600,cursor:"pointer",background:sfilt===s?(s==="all"?"#334155":m.bg):"#0f172a",color:sfilt===s?(s==="all"?"#e2e8f0":m.color):"#475569",outline:sfilt===s?`1px solid ${s==="all"?"#334155":m.color}`:"none"}}>{s==="all"?"All Status":`${m.icon} ${m.label}`}</button>);})}
-      <button onClick={()=>openAdd(fmt(cur))} style={{marginLeft:"auto",padding:"5px 16px",borderRadius:20,border:"none",background:"#6366f1",color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}}>+ New Task</button>
+
+    {/* FILTERS & NAVIGATION */}
+    <div style={{display:"flex",gap:12,marginBottom:24,flexWrap:"wrap",alignItems:"center",background:"#0f172a",padding:"12px 20px",borderRadius:16,border:"1px solid #1e293b"}}>
+      {["all","High","Medium","Low"].map(p=><button key={p} onClick={()=>setFilter(p)} style={{padding:"6px 14px",borderRadius:20,border:"none",fontSize:12,fontWeight:700,cursor:"pointer",background:filter===p?(p==="all"?"#334155":PC[p]+"33"):"#020617",color:filter===p?(p==="all"?"#e2e8f0":PC[p]):"#64748b",boxShadow:filter===p?`0 0 0 1px ${p==="all"?"#475569":PC[p]}`:"none"}} className="btn-action">{p==="all"?"All Priorities":p}</button>)}
+      <div style={{width:1,height:24,background:"#1e293b",margin:"0 4px"}}/>
+      {["all","pending","completed","missed","deferred"].map(s=>{const m=SM[s]||{};return(<button key={s} onClick={()=>setSfilt(s)} style={{padding:"6px 14px",borderRadius:20,border:"none",fontSize:12,fontWeight:700,cursor:"pointer",background:sfilt===s?(s==="all"?"#334155":m.bg):"#020617",color:sfilt===s?(s==="all"?"#e2e8f0":m.color):"#64748b",boxShadow:sfilt===s?`0 0 0 1px ${s==="all"?"#475569":m.color}`:"none"}} className="btn-action">{s==="all"?"All Status":`${m.icon} ${m.label}`}</button>);})}
+      <button onClick={()=>openAdd(fmt(cur))} style={{marginLeft:"auto",padding:"8px 20px",borderRadius:12,border:"none",background:"#6366f1",color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}} className="btn-action">+ New Task</button>
     </div>
-    <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:14,marginBottom:16}}>
-      <button onClick={()=>nav(-1)} style={{background:"#1e293b",border:"none",color:"#e2e8f0",borderRadius:8,padding:"5px 13px",fontSize:16,cursor:"pointer"}}>‹</button>
-      <button onClick={()=>setCur(new Date(tod))} style={{background:"none",border:"none",color:"#6366f1",fontWeight:700,fontSize:12,cursor:"pointer"}}>Today</button>
-      <span style={{fontWeight:700,fontSize:14,color:"#e2e8f0",minWidth:220,textAlign:"center"}}>{navLabel()}</span>
-      <button onClick={()=>nav(1)} style={{background:"#1e293b",border:"none",color:"#e2e8f0",borderRadius:8,padding:"5px 13px",fontSize:16,cursor:"pointer"}}>›</button>
+
+    {/* DATE CONTROLS */}
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:16,marginBottom:24}}>
+      <button onClick={()=>nav(-1)} className="nav-arrow">‹</button>
+      <button onClick={()=>setCur(new Date(tod))} style={{background:"none",border:"none",color:"#6366f1",fontWeight:800,fontSize:14,cursor:"pointer",textTransform:"uppercase",letterSpacing:1}} className="btn-action">Today</button>
+      <span style={{fontWeight:800,fontSize:18,color:"#e2e8f0",minWidth:250,textAlign:"center"}}>{navLabel()}</span>
+      <button onClick={()=>nav(1)} className="nav-arrow">›</button>
     </div>
+
+    {/* RENDER ACTIVE VIEW */}
     {view==="monthly"&&renderMonthly()}
     {view==="weekly"&&renderWeekly()}
     {view==="daily"&&renderDaily()}
-  </div>
 
-  {/* ADD/EDIT MODAL */}
-  {showModal&&<div style={{position:"fixed",inset:0,background:"#00000090",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100,padding:16}} onClick={()=>setShowModal(false)}>
-    <div style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:16,padding:24,width:"100%",maxWidth:420,boxShadow:"0 25px 60px #0008",maxHeight:"90vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
-      <h2 style={{margin:"0 0 16px",fontWeight:800,fontSize:17,color:"#e2e8f0"}}>{editTask?"Edit Task":"Add New Task"}</h2>
-      <label style={{fontSize:11,color:"#64748b",fontWeight:700}}>TITLE</label>
-      <input value={form.title} onChange={e=>setForm(f=>({...f,title:e.target.value}))} placeholder="Task title..." autoFocus style={inp}/>
-      <label style={{fontSize:11,color:"#64748b",fontWeight:700}}>PRIORITY</label>
-      <select value={form.priority} onChange={e=>setForm(f=>({...f,priority:e.target.value}))} style={{...inp,marginBottom:14}}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select>
+    {/* SETTINGS MODAL */}
+    {showConfig&&<div style={{position:"fixed",inset:0,background:"#000000b0",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100,padding:20,backdropFilter:"blur(4px)"}} onClick={()=>setShowConfig(false)}>
+      <div style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:20,padding:28,width:"100%",maxWidth:500,boxShadow:"0 30px 60px rgba(0,0,0,0.7)",maxHeight:"90vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+        <h2 style={{margin:"0 0 20px",fontWeight:800,fontSize:20,color:"#e2e8f0"}}>⚙️ Calendar Settings</h2>
+        
+        {/* LEAVES SECTION */}
+        <div style={{background:"#0b1120",border:"1px solid #1e293b",borderRadius:12,padding:16,marginBottom:20}}>
+          <h3 style={{fontSize:14,fontWeight:800,color:"#f59e0b",marginBottom:12}}>🌴 Mark Absent / Leave</h3>
+          <div style={{display:"flex",gap:10,marginBottom:12}}>
+            <input type="date" value={newLeave} onChange={e=>setNewLeave(e.target.value)} style={{...inp,marginBottom:0,flex:1}}/>
+            <button onClick={()=>{
+              if(!settings.leaves.includes(newLeave)){saveSettings({...settings,leaves:[...settings.leaves,newLeave].sort()});}
+            }} style={{background:"#f59e0b",color:"#fff",border:"none",borderRadius:10,padding:"0 16px",fontWeight:800,cursor:"pointer"}} className="btn-action">Add</button>
+          </div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {settings.leaves.length===0&&<span style={{fontSize:12,color:"#475569"}}>No leaves scheduled.</span>}
+            {settings.leaves.map(l=><div key={l} style={{background:"#f59e0b22",color:"#f59e0b",padding:"4px 10px",borderRadius:20,fontSize:12,fontWeight:700,display:"flex",alignItems:"center",gap:6}}>
+              {fmtDateShort(l)}
+              <span onClick={()=>saveSettings({...settings,leaves:settings.leaves.filter(x=>x!==l)})} style={{cursor:"pointer",color:"#fff"}}>✕</span>
+            </div>)}
+          </div>
+        </div>
 
-      {/* BLOCK TIME */}
-      <label style={{fontSize:11,color:"#64748b",fontWeight:700}}>BLOCK TIME</label>
-      <div style={{fontSize:10,color:"#475569",marginTop:1,marginBottom:8}}>When do you start and when do you expect to finish?</div>
-      <div style={{background:"#0b1120",border:"1px solid #334155",borderRadius:10,padding:"10px 12px",marginBottom:8}}>
-        <div style={{fontSize:10,color:"#10b981",fontWeight:700,marginBottom:6,textTransform:"uppercase",letterSpacing:.5}}>▶ Start</div>
-        <div style={{display:"flex",gap:8}}>
-          <div style={{flex:1}}><input type="date" value={form.date} onChange={e=>{const nd=e.target.value;setForm(f=>({...f,date:nd,endDate:f.endDate<nd?nd:f.endDate}));}} style={{...inp,marginBottom:0}}/></div>
-          <div style={{flex:1}}><input type="time" value={form.startTime} onChange={e=>setForm(f=>({...f,startTime:e.target.value}))} style={{...inp,marginBottom:0}}/></div>
+        {/* HOLIDAYS SECTION */}
+        <div style={{background:"#0b1120",border:"1px solid #1e293b",borderRadius:12,padding:16,marginBottom:24}}>
+          <h3 style={{fontSize:14,fontWeight:800,color:"#ec4899",marginBottom:12}}>🎉 Mark Holidays</h3>
+          <div style={{display:"flex",gap:10,marginBottom:12}}>
+            <input type="date" value={newHolDate} onChange={e=>setNewHolDate(e.target.value)} style={{...inp,marginBottom:0,flex:1}}/>
+            <input type="text" placeholder="Holiday Name" value={newHolName} onChange={e=>setNewHolName(e.target.value)} style={{...inp,marginBottom:0,flex:1}}/>
+            <button onClick={()=>{
+              if(newHolName.trim()&&!settings.holidays.find(h=>h.date===newHolDate)){saveSettings({...settings,holidays:[...settings.holidays,{date:newHolDate,name:newHolName}].sort((a,b)=>a.date.localeCompare(b.date))}); setNewHolName("");}
+            }} style={{background:"#ec4899",color:"#fff",border:"none",borderRadius:10,padding:"0 16px",fontWeight:800,cursor:"pointer"}} className="btn-action">Add</button>
+          </div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {settings.holidays.length===0&&<span style={{fontSize:12,color:"#475569"}}>No holidays scheduled.</span>}
+            {settings.holidays.map(h=><div key={h.date} style={{background:"#ec489922",color:"#ec4899",padding:"4px 10px",borderRadius:20,fontSize:12,fontWeight:700,display:"flex",alignItems:"center",gap:6}}>
+              {h.name} ({fmtDateShort(h.date)})
+              <span onClick={()=>saveSettings({...settings,holidays:settings.holidays.filter(x=>x.date!==h.date)})} style={{cursor:"pointer",color:"#fff"}}>✕</span>
+            </div>)}
+          </div>
+        </div>
+        
+        <div style={{fontSize:11,color:"#64748b",marginBottom:20,lineHeight:1.5,textAlign:"center"}}>
+          ℹ️ <strong>Working Days Rule:</strong> Sundays are off. Saturdays are off, EXCEPT the 1st Saturday of every month, which acts as a normal working day.
+        </div>
+
+        <button onClick={()=>setShowConfig(false)} style={{width:"100%",padding:"14px 0",borderRadius:10,border:"none",background:"#1e293b",color:"#e2e8f0",fontWeight:800,fontSize:14,cursor:"pointer"}} className="btn-action">Done</button>
+      </div>
+    </div>}
+
+    {/* ADD/EDIT MODAL */}
+    {showModal&&<div style={{position:"fixed",inset:0,background:"#000000b0",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100,padding:20,backdropFilter:"blur(4px)"}} onClick={()=>setShowModal(false)}>
+      <div style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:20,padding:28,width:"100%",maxWidth:460,boxShadow:"0 30px 60px rgba(0,0,0,0.7)",maxHeight:"90vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+        <h2 style={{margin:"0 0 20px",fontWeight:800,fontSize:20,color:"#e2e8f0"}}>{editTask?"Edit Task":"Add New Task"}</h2>
+        
+        {formError && <div style={{background:"#ef444422", border:"1px solid #ef444455", color:"#ef4444", padding:"12px", borderRadius:10, fontSize:13, fontWeight:600, marginBottom:16, whiteSpace:"pre-wrap", lineHeight:1.5}}>⚠️ {formError}</div>}
+
+        <label style={{fontSize:12,color:"#64748b",fontWeight:800}}>TASK TITLE</label>
+        <input value={form.title} onChange={e=>setForm(f=>({...f,title:e.target.value}))} placeholder="What needs to be done?" autoFocus style={inp}/>
+        
+        <label style={{fontSize:12,color:"#64748b",fontWeight:800}}>PRIORITY LEVEL</label>
+        <select value={form.priority} onChange={e=>setForm(f=>({...f,priority:e.target.value}))} style={{...inp,marginBottom:20}}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select>
+
+        <label style={{fontSize:12,color:"#64748b",fontWeight:800}}>SCHEDULE & TIME BLOCK</label>
+        <div style={{fontSize:11,color:"#475569",marginTop:2,marginBottom:10}}>Set the dates and specific timeframe for this task.</div>
+        <div style={{background:"#020617",border:"1px solid #1e293b",borderRadius:12,padding:"14px",marginBottom:10}}>
+          <div style={{fontSize:11,color:"#10b981",fontWeight:800,marginBottom:8,textTransform:"uppercase",letterSpacing:1}}>▶ Starts At</div>
+          <div style={{display:"flex",gap:10}}>
+            <div style={{flex:1}}><input type="date" value={form.date} onChange={e=>{setFormError(""); const nd=e.target.value;setForm(f=>({...f,date:nd,endDate:f.endDate<nd?nd:f.endDate}));}} style={{...inp,marginBottom:0}}/></div>
+            <div style={{flex:1}}><input type="time" value={form.startTime} onChange={e=>{setFormError(""); setForm(f=>({...f,startTime:e.target.value}));}} style={{...inp,marginBottom:0}}/></div>
+          </div>
+        </div>
+        <div style={{background:"#020617",border:"1px solid #1e293b",borderRadius:12,padding:"14px",marginBottom:14}}>
+          <div style={{fontSize:11,color:"#ef4444",fontWeight:800,marginBottom:8,textTransform:"uppercase",letterSpacing:1}}>⏹ Finishes By</div>
+          <div style={{display:"flex",gap:10}}>
+            <div style={{flex:1}}><input type="date" value={form.endDate} min={form.date} onChange={e=>{setFormError(""); setForm(f=>({...f,endDate:e.target.value}));}} style={{...inp,marginBottom:0}}/></div>
+            <div style={{flex:1}}><input type="time" value={form.endTime} onChange={e=>{setFormError(""); setForm(f=>({...f,endTime:e.target.value}));}} style={{...inp,marginBottom:0}}/></div>
+          </div>
+        </div>
+        {(()=>{const dur=calcDuration(form.date,form.startTime,form.endDate,form.endTime);return dur?(<div style={{display:"flex",alignItems:"center",gap:12,background:form.color+"11",border:`1px solid ${form.color}55`,borderRadius:12,padding:"12px 16px",marginBottom:20}}>
+          <span style={{fontSize:20}}>⏱</span>
+          <div style={{flex:1}}>
+            <div style={{fontSize:14,color:form.color,fontWeight:800}}>{dur.label}</div>
+            <div style={{fontSize:11,color:"#94a3b8",marginTop:2,fontWeight:600}}>{fmtDateShort(form.date)} {fmtTime(form.startTime)} → {fmtDateShort(form.endDate)} {fmtTime(form.endTime)}</div>
+          </div>
+        </div>):null;})()}
+
+        <label style={{fontSize:12,color:"#64748b",fontWeight:800}}>COLOR CODE</label>
+        <div style={{display:"flex",gap:10,marginTop:8,marginBottom:20}}>{COLORS.map(c=><div key={c} onClick={()=>setForm(f=>({...f,color:c}))} style={{width:28,height:28,borderRadius:"50%",background:c,cursor:"pointer",border:form.color===c?"3px solid #fff":"3px solid transparent",transition:"0.2s"}} className="btn-action"/>)}</div>
+        
+        <label style={{fontSize:12,color:"#64748b",fontWeight:800}}>ADDITIONAL NOTES</label>
+        <textarea value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))} placeholder="Optional details..." style={{...inp,resize:"vertical",minHeight:70,marginBottom:24}}/>
+        
+        <div style={{display:"flex",gap:10}}>
+          {editTask&&<button onClick={()=>delTask(editTask.id)} style={{flex:1,padding:"12px 0",borderRadius:10,border:"none",background:"#ef444422",color:"#ef4444",fontWeight:800,fontSize:14,cursor:"pointer"}} className="btn-action">Delete</button>}
+          <button onClick={()=>setShowModal(false)} style={{flex:1,padding:"12px 0",borderRadius:10,border:"none",background:"#1e293b",color:"#94a3b8",fontWeight:800,fontSize:14,cursor:"pointer"}} className="btn-action">Cancel</button>
+          <button onClick={saveTask} style={{flex:2,padding:"12px 0",borderRadius:10,border:"none",background:"#6366f1",color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}} className="btn-action">{editTask?"Save Changes":"Add Task"}</button>
         </div>
       </div>
-      <div style={{background:"#0b1120",border:"1px solid #334155",borderRadius:10,padding:"10px 12px",marginBottom:10}}>
-        <div style={{fontSize:10,color:"#ef4444",fontWeight:700,marginBottom:6,textTransform:"uppercase",letterSpacing:.5}}>⏹ Finish By</div>
-        <div style={{display:"flex",gap:8}}>
-          <div style={{flex:1}}><input type="date" value={form.endDate} min={form.date} onChange={e=>setForm(f=>({...f,endDate:e.target.value}))} style={{...inp,marginBottom:0}}/></div>
-          <div style={{flex:1}}><input type="time" value={form.endTime} onChange={e=>setForm(f=>({...f,endTime:e.target.value}))} style={{...inp,marginBottom:0}}/></div>
+    </div>}
+
+    {/* REASON MODAL */}
+    {showReason&&reasonTask&&<div style={{position:"fixed",inset:0,background:"#000000b0",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200,padding:20,backdropFilter:"blur(4px)"}} onClick={()=>setShowReason(false)}>
+      <div style={{background:"#0f172a",border:"1px solid #334155",borderRadius:20,padding:28,width:"100%",maxWidth:460,boxShadow:"0 30px 60px rgba(0,0,0,0.7)"}} onClick={e=>e.stopPropagation()}>
+        <h2 style={{margin:"0 0 6px",fontWeight:800,fontSize:20,color:"#e2e8f0"}}>Why wasn't this completed?</h2>
+        <div style={{fontSize:13,color:"#94a3b8",marginBottom:20}}>Task: <strong style={{color:"#e2e8f0"}}>{reasonTask.title}</strong></div>
+        
+        <label style={{fontSize:12,color:"#64748b",fontWeight:800}}>SELECT REASON *</label>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:8,marginBottom:20}}>
+          {MISS_REASONS.map(r=><button key={r} onClick={()=>setReasonData(d=>({...d,reason:r}))} style={{padding:"10px",borderRadius:10,border:"none",fontSize:12,fontWeight:700,cursor:"pointer",textAlign:"left",background:reasonData.reason===r?"#6366f1":"#1e293b",color:reasonData.reason===r?"#fff":"#94a3b8",transition:"0.2s"}} className="btn-action">{r}</button>)}
+        </div>
+        
+        <label style={{fontSize:12,color:"#64748b",fontWeight:800}}>ADDITIONAL DETAILS (optional)</label>
+        <textarea value={reasonData.reasonDetail} onChange={e=>setReasonData(d=>({...d,reasonDetail:e.target.value}))} placeholder="What exactly happened?" style={{...inp,minHeight:70,marginBottom:24}}/>
+        
+        <div style={{display:"flex",gap:10}}>
+          <button onClick={()=>setShowReason(false)} style={{flex:1,padding:"12px 0",borderRadius:10,border:"none",background:"#1e293b",color:"#94a3b8",fontWeight:800,fontSize:14,cursor:"pointer"}} className="btn-action">Cancel</button>
+          <button onClick={()=>{setPendingStatus("missed");setTimeout(saveReason,0);}} disabled={!reasonData.reason} style={{flex:1,padding:"12px 0",borderRadius:10,border:"none",background:reasonData.reason?"#ef444422":"#0f172a",color:reasonData.reason?"#ef4444":"#334155",fontWeight:800,fontSize:14,cursor:reasonData.reason?"pointer":"not-allowed"}} className="btn-action">❌ Missed</button>
+          <button onClick={()=>{setPendingStatus("deferred");setTimeout(saveReason,0);}} disabled={!reasonData.reason} style={{flex:1,padding:"12px 0",borderRadius:10,border:"none",background:reasonData.reason?"#8b5cf622":"#0f172a",color:reasonData.reason?"#8b5cf6":"#334155",fontWeight:800,fontSize:14,cursor:reasonData.reason?"pointer":"not-allowed"}} className="btn-action">🔄 Defer</button>
         </div>
       </div>
-      {(()=>{const dur=calcDuration(form.date,form.startTime,form.endDate,form.endTime);return dur?(<div style={{display:"flex",alignItems:"center",gap:8,background:form.color+"11",border:`1px solid ${form.color}44`,borderRadius:10,padding:"9px 14px",marginBottom:12}}>
-        <span style={{fontSize:16}}>⏱</span>
-        <div style={{flex:1}}>
-          <div style={{fontSize:13,color:form.color,fontWeight:700}}>{dur.label}</div>
-          <div style={{fontSize:10,color:"#94a3b8",marginTop:1}}>{fmtDateShort(form.date)} {fmtTime(form.startTime)} → {fmtDateShort(form.endDate)} {fmtTime(form.endTime)}</div>
+    </div>}
+
+    {/* EXPORT MODAL */}
+    {showExport&&<div style={{position:"fixed",inset:0,background:"#000000b0",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100,padding:20,backdropFilter:"blur(4px)"}} onClick={()=>setShowExport(false)}>
+      <div style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:20,padding:28,width:"100%",maxWidth:480,boxShadow:"0 30px 60px rgba(0,0,0,0.7)"}} onClick={e=>e.stopPropagation()}>
+        <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:24}}>
+          <div style={{width:44,height:44,borderRadius:12,background:"linear-gradient(135deg,#10b981,#059669)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,boxShadow:"0 4px 10px rgba(16,185,129,0.3)"}}>⬇</div>
+          <div><h2 style={{margin:0,fontWeight:800,fontSize:20,color:"#e2e8f0"}}>Export Report</h2><div style={{fontSize:13,color:"#64748b",fontWeight:600}}>Download tasks, status & stats</div></div>
         </div>
-      </div>):null;})()}
-
-      <label style={{fontSize:11,color:"#64748b",fontWeight:700}}>COLOR</label>
-      <div style={{display:"flex",gap:7,marginTop:5,marginBottom:12}}>{COLORS.map(c=><div key={c} onClick={()=>setForm(f=>({...f,color:c}))} style={{width:24,height:24,borderRadius:"50%",background:c,cursor:"pointer",border:form.color===c?"3px solid #fff":"3px solid transparent"}}/>)}</div>
-      <label style={{fontSize:11,color:"#64748b",fontWeight:700}}>NOTES</label>
-      <textarea value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))} placeholder="Optional notes..." style={{...inp,resize:"vertical",minHeight:50,marginBottom:16}}/>
-      <div style={{display:"flex",gap:7}}>
-        {editTask&&<button onClick={()=>delTask(editTask.id)} style={{flex:1,padding:"10px 0",borderRadius:9,border:"none",background:"#ef444422",color:"#ef4444",fontWeight:700,fontSize:13,cursor:"pointer"}}>Delete</button>}
-        <button onClick={()=>setShowModal(false)} style={{flex:1,padding:"10px 0",borderRadius:9,border:"none",background:"#1e293b",color:"#94a3b8",fontWeight:700,fontSize:13,cursor:"pointer"}}>Cancel</button>
-        <button onClick={saveTask} style={{flex:2,padding:"10px 0",borderRadius:9,border:"none",background:"#6366f1",color:"#fff",fontWeight:700,fontSize:13,cursor:"pointer"}}>{editTask?"Save Changes":"Add Task"}</button>
+        
+        <label style={{fontSize:12,color:"#64748b",fontWeight:800}}>DATE RANGE</label>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginTop:8,marginBottom:20}}>
+          {[["current","Current"],["today","Today"],["week","This Week"],["month","This Month"],["all","All Time"]].map(([v,l])=><button key={v} onClick={()=>setExpOpts(o=>({...o,range:v}))} style={{padding:"10px 0",borderRadius:10,border:"none",fontSize:12,fontWeight:700,cursor:"pointer",background:expOpts.range===v?"#6366f1":"#1e293b",color:expOpts.range===v?"#fff":"#94a3b8",transition:"0.2s"}} className="btn-action">{l}</button>)}
+        </div>
+        
+        <label style={{fontSize:12,color:"#64748b",fontWeight:800}}>EXPORT FORMAT</label>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginTop:8,marginBottom:24}}>
+          {[["pdf","📄 PDF Report"],["csv","📊 CSV Data"],["json","🗂 JSON Data"]].map(([v,l])=><button key={v} onClick={()=>setExpOpts(o=>({...o,format:v}))} style={{padding:"12px 0",borderRadius:10,border:"none",fontSize:12,fontWeight:700,cursor:"pointer",background:expOpts.format===v?"#6366f1":"#1e293b",color:expOpts.format===v?"#fff":"#94a3b8",transition:"0.2s"}} className="btn-action">{l}</button>)}
+        </div>
+        
+        <div style={{display:"flex",gap:10}}>
+          <button onClick={()=>setShowExport(false)} style={{flex:1,padding:"14px 0",borderRadius:10,border:"none",background:"#1e293b",color:"#94a3b8",fontWeight:800,fontSize:14,cursor:"pointer"}} className="btn-action">Cancel</button>
+          <button onClick={doExport} style={{flex:2,padding:"14px 0",borderRadius:10,border:"none",background:"linear-gradient(135deg,#10b981,#059669)",color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer",boxShadow:"0 4px 12px rgba(16,185,129,0.3)"}} className="btn-action">⬇ Download {expOpts.format.toUpperCase()}</button>
+        </div>
       </div>
-    </div>
-  </div>}
-
-  {showReason&&reasonTask&&<div style={{position:"fixed",inset:0,background:"#000000a0",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200,padding:16}} onClick={()=>setShowReason(false)}>
-    <div style={{background:"#0f172a",border:"1px solid #334155",borderRadius:16,padding:24,width:"100%",maxWidth:420,boxShadow:"0 25px 60px #0008"}} onClick={e=>e.stopPropagation()}>
-      <h2 style={{margin:"0 0 4px",fontWeight:800,fontSize:17,color:"#e2e8f0"}}>Why wasn't this completed?</h2>
-      <div style={{fontSize:12,color:"#64748b",marginBottom:16}}>Task: <strong style={{color:"#e2e8f0"}}>{reasonTask.title}</strong></div>
-      <label style={{fontSize:11,color:"#64748b",fontWeight:700}}>SELECT REASON *</label>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5,marginTop:6,marginBottom:14}}>
-        {MISS_REASONS.map(r=><button key={r} onClick={()=>setReasonData(d=>({...d,reason:r}))} style={{padding:"7px 8px",borderRadius:7,border:"none",fontSize:11,fontWeight:600,cursor:"pointer",textAlign:"left",background:reasonData.reason===r?"#6366f1":"#1e293b",color:reasonData.reason===r?"#fff":"#94a3b8"}}>{r}</button>)}
-      </div>
-      <label style={{fontSize:11,color:"#64748b",fontWeight:700}}>ADDITIONAL DETAILS (optional)</label>
-      <textarea value={reasonData.reasonDetail} onChange={e=>setReasonData(d=>({...d,reasonDetail:e.target.value}))} placeholder="What exactly happened?" style={{width:"100%",boxSizing:"border-box",marginTop:5,marginBottom:16,padding:"9px 13px",background:"#1e293b",border:"1px solid #334155",borderRadius:9,color:"#e2e8f0",fontSize:13,outline:"none",resize:"vertical",minHeight:56}}/>
-      <div style={{display:"flex",gap:7}}>
-        <button onClick={()=>setShowReason(false)} style={{flex:1,padding:"10px 0",borderRadius:9,border:"none",background:"#1e293b",color:"#94a3b8",fontWeight:700,fontSize:13,cursor:"pointer"}}>Cancel</button>
-        <button onClick={()=>{setPendingStatus("missed");setTimeout(saveReason,0);}} disabled={!reasonData.reason} style={{flex:1,padding:"10px 0",borderRadius:9,border:"none",background:reasonData.reason?"#ef444422":"#0f172a",color:reasonData.reason?"#ef4444":"#334155",fontWeight:700,fontSize:13,cursor:reasonData.reason?"pointer":"not-allowed"}}>❌ Missed</button>
-        <button onClick={()=>{setPendingStatus("deferred");setTimeout(saveReason,0);}} disabled={!reasonData.reason} style={{flex:1,padding:"10px 0",borderRadius:9,border:"none",background:reasonData.reason?"#8b5cf622":"#0f172a",color:reasonData.reason?"#8b5cf6":"#334155",fontWeight:700,fontSize:13,cursor:reasonData.reason?"pointer":"not-allowed"}}>🔄 Defer</button>
-      </div>
-    </div>
-  </div>}
-
-  {showExport&&<div style={{position:"fixed",inset:0,background:"#000000a0",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100,padding:16}} onClick={()=>setShowExport(false)}>
-    <div style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:18,padding:24,width:"100%",maxWidth:450,boxShadow:"0 30px 70px #0009"}} onClick={e=>e.stopPropagation()}>
-      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:18}}>
-        <div style={{width:36,height:36,borderRadius:9,background:"linear-gradient(135deg,#10b981,#059669)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17}}>⬇</div>
-        <div><h2 style={{margin:0,fontWeight:800,fontSize:17,color:"#e2e8f0"}}>Export Report</h2><div style={{fontSize:11,color:"#475569"}}>Includes status, reasons & stats</div></div>
-      </div>
-      <label style={{fontSize:11,color:"#64748b",fontWeight:700}}>DATE RANGE</label>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5,marginTop:5,marginBottom:12}}>{[["current","Current"],["today","Today"],["week","This Week"],["month","This Month"],["all","All"]].map(([v,l])=><button key={v} onClick={()=>setExpOpts(o=>({...o,range:v}))} style={{padding:"7px 0",borderRadius:7,border:"none",fontSize:11,fontWeight:600,cursor:"pointer",background:expOpts.range===v?"#6366f1":"#1e293b",color:expOpts.range===v?"#fff":"#94a3b8"}}>{l}</button>)}</div>
-      <label style={{fontSize:11,color:"#64748b",fontWeight:700}}>FORMAT</label>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5,marginTop:5,marginBottom:12}}>{[["pdf","📄 PDF"],["csv","📊 CSV"],["json","🗂 JSON"]].map(([v,l])=><button key={v} onClick={()=>setExpOpts(o=>({...o,format:v}))} style={{padding:"9px 0",borderRadius:7,border:"none",fontSize:11,fontWeight:600,cursor:"pointer",background:expOpts.format===v?"#6366f1":"#1e293b",color:expOpts.format===v?"#fff":"#94a3b8"}}>{l}</button>)}</div>
-      <div style={{display:"flex",gap:7}}>
-        <button onClick={()=>setShowExport(false)} style={{flex:1,padding:"11px 0",borderRadius:9,border:"none",background:"#1e293b",color:"#94a3b8",fontWeight:700,fontSize:13,cursor:"pointer"}}>Cancel</button>
-        <button onClick={doExport} style={{flex:2,padding:"11px 0",borderRadius:9,border:"none",background:"linear-gradient(135deg,#10b981,#059669)",color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer"}}>⬇ Export {expOpts.format.toUpperCase()}</button>
-      </div>
-    </div>
-  </div>}
+    </div>}
   </div>);
 }
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
