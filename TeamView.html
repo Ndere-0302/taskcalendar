@@ -9,15 +9,59 @@
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{background:#020617;color:#e2e8f0;font-family:'Segoe UI',sans-serif}
-  ::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:#0f172a}::-webkit-scrollbar-thumb{background:#334155;border-radius:3px}
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #020617; color: #e2e8f0; font-family: 'Segoe UI', system-ui, sans-serif; overflow-y: auto; overflow-x: hidden; }
+  
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+  .layout-wrapper { max-width: 1200px; margin: 0 auto; padding: 24px; min-height: 100vh; display: flex; flex-direction: column; }
+  .gradient-text { background: linear-gradient(90deg, #6366f1, #8b5cf6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  
+  .btn-action { transition: 0.2s; opacity: 0.85; }
+  .btn-action:hover { opacity: 1; transform: scale(1.05); }
+
+  .view-toggle-btn { padding: 6px 16px; border-radius: 20px; border: none; font-weight: 700; font-size: 13px; cursor: pointer; text-transform: capitalize; transition: 0.2s; }
+  .view-toggle-btn.active { background: #6366f1; color: #fff; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3); }
+  .view-toggle-btn.inactive { background: #1e293b; color: #94a3b8; }
+
+  .nav-arrow { background: #1e293b; border: none; color: #e2e8f0; border-radius: 8px; padding: 6px 14px; font-size: 18px; cursor: pointer; transition: 0.2s; display: flex; align-items: center; justify-content: center; }
+  .nav-arrow:hover { background: #334155; }
+
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+    70% { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+  }
+  .live-dot { width: 8px; height: 8px; background: #10b981; border-radius: 50%; display: inline-block; animation: pulse 2s infinite; margin-right: 6px; }
+
+  .month-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+  .month-day-lbl { text-align: center; font-weight: 700; font-size: 12px; color: #64748b; padding: 0 0 10px; text-transform: uppercase; letter-spacing: 1px; }
+  
+  .week-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; align-items: start; }
+  .week-col { background: #0b1120; border-radius: 14px; border: 1px solid #1e293b; display: flex; flex-direction: column; overflow: hidden; min-height: 300px; }
+  .week-col.is-cur { border-color: #6366f1; box-shadow: 0 0 0 1px #6366f1; }
+  .week-col-header { text-align: center; padding: 12px; border-bottom: 1px solid #1e293b; background: #0f172a; }
+  .week-col-body { padding: 10px; }
+
+  .task-card { background: #0f172a; border-radius: 10px; padding: 12px; margin-bottom: 10px; cursor: pointer; transition: all 0.2s ease; border: 1px solid #1e293b; border-left-width: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+  .task-card:hover { border-color: #334155; box-shadow: 0 8px 20px rgba(0,0,0,0.4); background: #141e33; }
+  
+  .hover-details { max-height: 0; opacity: 0; overflow: hidden; transition: max-height 0.3s ease, opacity 0.3s ease, margin-top 0.3s ease; }
+  .task-card:hover .hover-details { max-height: 400px; opacity: 1; margin-top: 8px; }
+
+  .daily-container { display: flex; gap: 24px; align-items: flex-start; }
+  .daily-tasks { flex: 1; min-width: 0; }
+  .daily-timeline { flex: 0 0 280px; background: #0b1120; border: 1px solid #1e293b; border-radius: 16px; padding: 16px; position: sticky; top: 24px; }
+  .day-badge { padding: 4px 8px; border-radius: 6px; font-size: 10px; font-weight: 800; display: inline-block; margin-top: 6px; }
 </style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const {useState,useMemo,useEffect} = React;
+const {useState,useMemo,useEffect,useCallback} = React;
 
 const SUPABASE_URL = "https://zcdvxrhldqcnizpspvdx.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpjZHZ4cmhsZHFjbml6cHNwdmR4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMxNDIzODMsImV4cCI6MjA4ODcxODM4M30.CD-ObU2hF3Ay76Jhtvnh8zHbEUX0ZV70LelGaoQc1Tg";
@@ -34,7 +78,14 @@ const SM={
 };
 
 const tod=new Date(); tod.setHours(0,0,0,0);
-const fmt=d=>d.toISOString().split("T")[0];
+
+const fmt = (d) => {
+  const yr = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const da = String(d.getDate()).padStart(2, "0");
+  return `${yr}-${mo}-${da}`;
+};
+
 const sow=d=>{const c=new Date(d);c.setDate(c.getDate()-c.getDay());return c;};
 const addD=(d,n)=>{const c=new Date(d);c.setDate(c.getDate()+n);return c;};
 
@@ -58,76 +109,100 @@ const getBlockStyle=(startTime,endTime,color)=>{
   const sM=sh*60+sm,eM=eh*60+em,dsM=420,deM=1140,tot=deM-dsM;
   const cs=Math.max(sM,dsM),ce=Math.min(eM,deM);if(ce<=cs)return null;
   const top=((cs-dsM)/tot)*100,height=((ce-cs)/tot)*100;
-  return{position:"absolute",top:top+"%",height:Math.max(height,3)+"%",left:3,right:3,background:color+"33",borderLeft:"3px solid "+color,borderRadius:5,padding:"2px 5px",fontSize:9,color:"#e2e8f0",fontWeight:600,overflow:"hidden",minHeight:14,boxSizing:"border-box"};
+  return{position:"absolute",top:top+"%",height:Math.max(height,3)+"%",left:3,right:3,background:color+"33",borderLeft:"3px solid "+color,borderRadius:5,padding:"4px 6px",fontSize:10,color:"#e2e8f0",fontWeight:600,overflow:"hidden",minHeight:18,boxSizing:"border-box"};
 };
 
 function App(){
-  const [view,setView]=useState("monthly");
+  const [view,setView]=useState("weekly");
   const [cur,setCur]=useState(new Date(tod));
   const [tasks,setTasks]=useState([]);
+  const [settings,setSettings]=useState({ leaves: [], holidays: [] });
   const [loading,setLoading]=useState(true);
   const [lastUpdated,setLastUpdated]=useState(null);
   const [showDetail,setShowDetail]=useState(null);
   const [sfilt,setSfilt]=useState("all");
   const [pfilt,setPfilt]=useState("all");
-  const [liveMsg,setLiveMsg]=useState("");
 
-  const lastUpdatedRef = React.useRef(null);
-
-  async function loadTasks(isPolling=false){
-    try{
-      const{data,error}=await supabase.from("tasks").select("*").eq("id",1).single();
-      if(!error&&data){
-        const newUpdated=data.updated_at;
-        if(!isPolling||newUpdated!==lastUpdatedRef.current){
-          if(isPolling&&lastUpdatedRef.current&&newUpdated!==lastUpdatedRef.current){
-            setLiveMsg("🔄 Just updated!");setTimeout(()=>setLiveMsg(""),3000);
-          }
-          lastUpdatedRef.current=newUpdated;
-          setTasks(data.data||[]);
-          setLastUpdated(data.updated_at?new Date(data.updated_at).toLocaleString():null);
+  const loadData = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.from("tasks").select("*").in("id", [1, 2]);
+      if (!error && data) {
+        const tRow = data.find(r => r.id === 1);
+        const sRow = data.find(r => r.id === 2);
+        if (tRow) {
+          setTasks(tRow.data || []);
+          setLastUpdated(new Date(tRow.updated_at).toLocaleTimeString());
         }
+        if (sRow) setSettings(sRow.data || { leaves: [], holidays: [] });
       }
-    }catch(e){console.error(e);}
-    finally{if(!isPolling)setLoading(false);}
-  }
+    } catch (e) { console.error(e); }
+    finally { setLoading(false); }
+  }, []);
 
-  useEffect(()=>{
-    loadTasks(false);
-    const interval=setInterval(()=>loadTasks(true),10000);
-    const channel=supabase.channel("tasks-teamview")
-      .on("postgres_changes",{event:"*",schema:"public",table:"tasks"},payload=>{
-        if(payload.new&&payload.new.data){setTasks(payload.new.data);setLastUpdated(new Date().toLocaleString());setLiveMsg("🔄 Just updated!");setTimeout(()=>setLiveMsg(""),3000);}
-      }).subscribe();
-    return()=>{clearInterval(interval);supabase.removeChannel(channel);};
-  },[]);
+  useEffect(() => {
+    loadData();
+    const interval = setInterval(loadData, 15000);
+    const channel = supabase.channel("team-view-sync")
+      .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, loadData)
+      .subscribe();
+    return () => { clearInterval(interval); supabase.removeChannel(channel); };
+  }, [loadData]);
 
-  // Expand multi-day tasks
-  const expanded=useMemo(()=>{
-    const res=[];
-    tasks.forEach(t=>{
-      const sd=t.date,ed=t.endDate||t.date;
-      if(sd===ed){res.push({...t});return;}
-      let c=new Date(sd+"T00:00:00");
-      const end=new Date(ed+"T00:00:00");
-      while(c<=end){
-        const ds=fmt(c);
-        const isFirst=ds===sd,isLast=ds===ed;
-        res.push({...t,date:ds,_oid:t.id,_isFirst:isFirst,_isLast:isLast,_isMid:!isFirst&&!isLast,
-          _dayStartTime:isFirst?(t.startTime||"07:00"):"07:00",
-          _dayEndTime:isLast?(t.endTime||"19:00"):"19:00"
-        });
-        c=addD(c,1);
+  const getDayInfo = useCallback((ds) => {
+    const [y, m, dNum] = ds.split('-').map(Number);
+    const d = new Date(y, m - 1, dNum);
+    if(settings.leaves.includes(ds)) return { isOff: true, label: "🌴 Absent / Leave", color: "#f59e0b", bg: "#f59e0b22" };
+    const hol = settings.holidays.find(h=>h.date===ds);
+    if(hol) return { isOff: true, label: `🎉 ${hol.name}`, color: "#ec4899", bg: "#ec489922" };
+    const dayOfWeek = d.getDay();
+    if(dayOfWeek === 0) return { isOff: true, label: "🛋️ Sunday Weekend", color: "#64748b", bg: "#1e293b" };
+    if(dayOfWeek === 6 && dNum > 7) return { isOff: true, label: "🛋️ Saturday Off", color: "#64748b", bg: "#1e293b" };
+    return { isOff: false, label: "", color: "", bg: "" };
+  }, [settings]);
+
+  const expanded = useMemo(() => {
+    const res = [];
+    tasks.forEach(t => {
+      const sd = t.date, ed = t.endDate || t.date;
+      if (sd === ed) { res.push({ ...t, _dayStartTime: t.startTime, _dayEndTime: t.endTime }); return; }
+      const [sy, sm, sdNum] = sd.split('-').map(Number);
+      let c = new Date(sy, sm - 1, sdNum);
+      const [ey, em, edNum] = ed.split('-').map(Number);
+      const end = new Date(ey, em - 1, edNum);
+      while (c <= end) {
+        const ds = fmt(c);
+        const dInfo = getDayInfo(ds);
+        if (!dInfo.isOff) {
+          const isSat = c.getDay() === 6;
+          const actualSt = ds === sd ? (t.startTime || "09:00") : "09:00";
+          const actualEt = ds === ed ? (t.endTime || (isSat ? "16:00" : "17:00")) : (isSat ? "16:00" : "17:00");
+          res.push({ ...t, date: ds, _oid: t.id, _isMid: ds !== sd && ds !== ed, _dayStartTime: actualSt, _dayEndTime: actualEt });
+        }
+        c = addD(c, 1);
       }
     });
     return res;
-  },[tasks]);
+  }, [tasks, getDayInfo]);
 
-  const tfd=ds=>expanded.filter(t=>t.date===ds&&(pfilt==="all"||t.priority===pfilt)&&(sfilt==="all"||t.status===sfilt));
+  const tfd = ds => expanded.filter(t => t.date === ds && (pfilt === "all" || t.priority === pfilt) && (sfilt === "all" || t.status === sfilt));
 
-  function nav(dir){const d=new Date(cur);if(view==="daily")d.setDate(d.getDate()+dir);else if(view==="weekly")d.setDate(d.getDate()+dir*7);else d.setMonth(d.getMonth()+dir);setCur(d);}
+  const getActiveTask = () => {
+    const now = new Date();
+    const curM = now.getHours() * 60 + now.getMinutes();
+    return expanded.find(t => t.date === fmt(now) && t.status === "pending" && (t._dayStartTime && t._dayEndTime) && (curM >= (t._dayStartTime.split(':')[0]*60 + +t._dayStartTime.split(':')[1]) && curM <= (t._dayEndTime.split(':')[0]*60 + +t._dayEndTime.split(':')[1])));
+  };
+  const activeTask = getActiveTask();
+
+  function nav(dir){
+    const d=new Date(cur);
+    if(view==="daily") d.setDate(d.getDate()+dir);
+    else if(view==="weekly") d.setDate(d.getDate()+dir*7);
+    else d.setMonth(d.getMonth()+dir);
+    setCur(d);
+  }
+
   const navLabel=()=>{
-    if(view==="daily")return cur.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric"});
+    if(view==="daily") return cur.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric"});
     if(view==="weekly"){const ws=sow(cur),we=addD(ws,6);return`${ws.toLocaleDateString("en-US",{month:"short",day:"numeric"})} – ${we.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}`;}
     return`${MONTHS[cur.getMonth()]} ${cur.getFullYear()}`;
   };
@@ -135,20 +210,15 @@ function App(){
   const doneC=tasks.filter(t=>t.status==="completed").length;
   const missC=tasks.filter(t=>t.status==="missed").length;
   const pendC=tasks.filter(t=>t.status==="pending").length;
-  const defC=tasks.filter(t=>t.status==="deferred").length;
   const rate=tasks.length?Math.round((doneC/tasks.length)*100):0;
 
   function DurationBadge({t}){
     const src=t._oid?tasks.find(x=>x.id===t._oid):t;
     const dur=src?calcDuration(src.date,src.startTime,src.endDate||src.date,src.endTime):null;
-    const isMulti=src&&src.date!==(src.endDate||src.date);
     if(!dur&&!t.startTime)return null;
-    return(<div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:3}}>
-      {t.startTime&&<span style={{fontSize:9,color:"#3b82f6",background:"#3b82f622",borderRadius:10,padding:"1px 6px",fontWeight:700}}>
-        🕐 {fmtTime(t._dayStartTime||t.startTime)}–{fmtTime(t._dayEndTime||t.endTime)}
-      </span>}
-      {dur&&<span style={{fontSize:9,color:"#8b5cf6",background:"#8b5cf622",borderRadius:10,padding:"1px 6px",fontWeight:700}}>⏱ {dur.label}</span>}
-      {isMulti&&t._isFirst&&<span style={{fontSize:9,color:"#ec4899",background:"#ec489922",borderRadius:10,padding:"1px 6px",fontWeight:700}}>📅 → {fmtDateShort(src.endDate)}</span>}
+    return(<div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
+      {t.startTime&&<span style={{fontSize:10,color:"#3b82f6",background:"#3b82f622",borderRadius:12,padding:"3px 8px",fontWeight:700}}>🕐 {fmtTime(t._dayStartTime||t.startTime)}–{fmtTime(t._dayEndTime||t.endTime)}</span>}
+      {dur&&<span style={{fontSize:10,color:"#8b5cf6",background:"#8b5cf622",borderRadius:12,padding:"3px 8px",fontWeight:700}}>⏱ {dur.label}</span>}
     </div>);
   }
 
@@ -156,197 +226,119 @@ function App(){
     const s=SM[t.status]||SM.pending;
     const src=t._oid?tasks.find(x=>x.id===t._oid):t;
     const dur=src?calcDuration(src.date,src.startTime,src.endDate||src.date,src.endTime):null;
-    const isMulti=src&&src.date!==(src.endDate||src.date);
-    return(<div style={{position:"fixed",inset:0,background:"#00000090",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100,padding:16}} onClick={onClose}>
-      <div style={{background:"#0f172a",border:`1px solid ${s.color}44`,borderLeft:`4px solid ${s.color}`,borderRadius:16,padding:24,width:"100%",maxWidth:420,boxShadow:"0 25px 60px #0008"}} onClick={e=>e.stopPropagation()}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
-          <h2 style={{fontWeight:800,fontSize:17,color:"#e2e8f0",flex:1,paddingRight:12}}>{t.title}{t._isMid?" (continued)":""}</h2>
-          <button onClick={onClose} style={{background:"none",border:"none",color:"#64748b",fontSize:20,cursor:"pointer",lineHeight:1}}>✕</button>
+    return(<div style={{position:"fixed",inset:0,background:"#000000b0",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100,padding:20,backdropFilter:"blur(4px)"}} onClick={onClose}>
+      <div style={{background:"#0f172a",border:`1px solid ${s.color}55`,borderLeft:`4px solid ${s.color}`,borderRadius:20,padding:28,width:"100%",maxWidth:460,boxShadow:"0 30px 60px rgba(0,0,0,0.7)"}} onClick={e=>e.stopPropagation()}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:16}}>
+          <h2 style={{fontWeight:800,fontSize:20,color:"#e2e8f0"}}>{t.title}</h2>
+          <button onClick={onClose} style={{background:"#1e293b",border:"none",color:"#94a3b8",borderRadius:"50%",width:32,height:32,cursor:"pointer"}}>✕</button>
         </div>
-        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
-          <span style={{background:s.bg,color:s.color,borderRadius:20,padding:"3px 10px",fontSize:12,fontWeight:700}}>{s.icon} {s.label}</span>
-          <span style={{background:PC[t.priority]+"22",color:PC[t.priority],borderRadius:20,padding:"3px 10px",fontSize:12,fontWeight:700}}>{t.priority} Priority</span>
-          {dur&&<span style={{background:"#8b5cf622",color:"#8b5cf6",borderRadius:20,padding:"3px 10px",fontSize:12,fontWeight:700}}>⏱ {dur.label}</span>}
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:20}}>
+          <span style={{background:s.bg,color:s.color,borderRadius:20,padding:"4px 12px",fontSize:12,fontWeight:800}}>{s.icon} {s.label}</span>
+          <span style={{background:PC[t.priority]+"22",color:PC[t.priority],borderRadius:20,padding:"4px 12px",fontSize:12,fontWeight:800}}>{t.priority}</span>
         </div>
-        <div style={{background:"#1e293b",borderRadius:10,padding:12,marginBottom:12,display:"flex",flexDirection:"column",gap:7}}>
-          {src&&src.startTime&&<div style={{display:"flex",gap:8,fontSize:13}}><span style={{color:"#64748b",minWidth:90}}>▶ Start</span><span style={{color:"#e2e8f0",fontWeight:600}}>{fmtDateShort(src.date)} at {fmtTime(src.startTime)}</span></div>}
-          {src&&src.endTime&&<div style={{display:"flex",gap:8,fontSize:13}}><span style={{color:"#64748b",minWidth:90}}>⏹ Finish</span><span style={{color:"#e2e8f0",fontWeight:600}}>{fmtDateShort(src.endDate||src.date)} at {fmtTime(src.endTime)}</span></div>}
-          {t.completedAt&&<div style={{display:"flex",gap:8,fontSize:13}}><span style={{color:"#64748b",minWidth:90}}>✅ Done</span><span style={{color:"#10b981",fontWeight:600}}>{new Date(t.completedAt).toLocaleString()}</span></div>}
-          {t.notes&&<div style={{display:"flex",gap:8,fontSize:13}}><span style={{color:"#64748b",minWidth:90}}>📝 Notes</span><span style={{color:"#e2e8f0"}}>{t.notes}</span></div>}
+        <div style={{background:"#020617",border:"1px solid #1e293b",borderRadius:12,padding:16,fontSize:13,display:"flex",flexDirection:"column",gap:10}}>
+          {src.startTime && <div><span style={{color:"#64748b"}}>▶ Start:</span> {fmtDateShort(src.date)} at {fmtTime(src.startTime)}</div>}
+          {src.endTime && <div><span style={{color:"#64748b"}}>⏹ Finish:</span> {fmtDateShort(src.endDate||src.date)} at {fmtTime(src.endTime)}</div>}
+          {t.notes && <div style={{borderTop:"1px solid #1e293b",paddingTop:10,color:"#cbd5e1"}}>{t.notes}</div>}
         </div>
-        {(t.status==="missed"||t.status==="deferred")&&t.reason&&(
-          <div style={{background:s.bg,border:`1px solid ${s.color}44`,borderRadius:10,padding:12,fontSize:13}}>
-            <div style={{fontWeight:700,color:s.color,marginBottom:4}}>{t.status==="missed"?"❌ Missed Reason":"🔄 Deferred Reason"}</div>
-            <div style={{color:"#e2e8f0"}}>{t.reason}</div>
-            {t.reasonDetail&&<div style={{color:"#94a3b8",marginTop:4,fontSize:12}}>{t.reasonDetail}</div>}
-          </div>
-        )}
-        <div style={{marginTop:14,padding:"8px 12px",background:"#1e293b",borderRadius:8,fontSize:11,color:"#475569",textAlign:"center"}}>👁 View Only — Contact the owner to make changes</div>
+        <div style={{marginTop:20,textAlign:"center",fontSize:12,color:"#94a3b8",fontWeight:700}}>🔒 Read-Only View</div>
       </div>
     </div>);
   }
 
-  function renderMonthly(){
-    const yr=cur.getFullYear(),mo=cur.getMonth();
-    const fd=new Date(yr,mo,1).getDay(),dim=new Date(yr,mo+1,0).getDate();
-    const cells=[];for(let i=0;i<fd;i++)cells.push(null);for(let d=1;d<=dim;d++)cells.push(new Date(yr,mo,d));
-    return(<div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,marginBottom:4}}>{DAYS.map(d=><div key={d} style={{textAlign:"center",fontWeight:700,fontSize:11,color:"#94a3b8",padding:"5px 0"}}>{d}</div>)}</div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3}}>
-        {cells.map((date,i)=>{
-          if(!date)return<div key={i}/>;
-          const ds=fmt(date),ts=tfd(ds),isT=ds===fmt(tod);
-          const hasMiss=ts.some(t=>t.status==="missed"),hasDone=ts.some(t=>t.status==="completed");
-          return(<div key={ds} onClick={()=>{setCur(new Date(ds+"T00:00:00"));setView("daily");}} style={{minHeight:78,background:"#0f172a",border:isT?"2px solid #6366f1":"1px solid #1e293b",borderRadius:9,padding:5,cursor:"pointer"}}>
-            <div style={{display:"flex",alignItems:"center",gap:3,marginBottom:2}}>
-              <span style={{fontWeight:isT?700:400,color:isT?"#6366f1":"#cbd5e1",fontSize:12}}>{date.getDate()}</span>
-              {hasMiss&&<span style={{width:5,height:5,borderRadius:"50%",background:"#ef4444",display:"inline-block"}}/>}
-              {hasDone&&<span style={{width:5,height:5,borderRadius:"50%",background:"#10b981",display:"inline-block"}}/>}
-            </div>
-            {ts.slice(0,3).map(t=><div key={(t._oid||t.id)+t.date} onClick={e=>{e.stopPropagation();setShowDetail(t);}} style={{background:t.color+"22",borderLeft:`3px solid ${SM[t.status]?.color||t.color}`,borderRadius:3,padding:"2px 4px",marginBottom:2,fontSize:10,color:"#e2e8f0",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",textDecoration:t.status==="completed"?"line-through":"none",opacity:t.status==="completed"?0.55:1}}>
-              {SM[t.status]?.icon} {t._dayStartTime?fmtTime(t._dayStartTime)+" ":t.startTime?fmtTime(t.startTime)+" ":""}{t.title}{t._isMid?" ↔":""}
-            </div>)}
-            {ts.length>3&&<div style={{fontSize:9,color:"#64748b"}}>+{ts.length-3} more</div>}
-          </div>);
-        })}
-      </div>
-    </div>);
-  }
+  if(loading)return(<div style={{minHeight:"100vh",background:"#020617",display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{textAlign:"center"}}><div style={{fontSize:40}}>☁️</div><div style={{color:"#e2e8f0",fontWeight:800,marginTop:10}}>Connecting to Live Sync...</div></div></div>);
 
-  function renderWeekly(){
-    const ws=sow(cur),days=Array.from({length:7},(_,i)=>addD(ws,i));
-    return(<div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:5}}>
-      {days.map(date=>{
-        const ds=fmt(date),ts=tfd(ds),isT=ds===fmt(tod);
-        return(<div key={ds} style={{background:"#0f172a",border:isT?"2px solid #6366f1":"1px solid #1e293b",borderRadius:10,padding:8,minHeight:180}}>
-          <div style={{textAlign:"center",marginBottom:6}}><div style={{fontSize:10,color:"#64748b",fontWeight:700}}>{DAYS[date.getDay()]}</div><div style={{fontSize:20,fontWeight:700,color:isT?"#6366f1":"#e2e8f0"}}>{date.getDate()}</div></div>
-          {ts.map(t=><div key={(t._oid||t.id)+t.date} onClick={()=>setShowDetail(t)} style={{background:t.color+"22",borderLeft:`3px solid ${SM[t.status]?.color||t.color}`,borderRadius:5,padding:"5px 6px",marginBottom:5,cursor:"pointer"}}>
-            <div style={{fontSize:11,fontWeight:600,color:"#e2e8f0",textDecoration:t.status==="completed"?"line-through":"none",opacity:t.status==="completed"?0.6:1,marginBottom:2}}>{SM[t.status]?.icon} {t.title}{t._isMid?" ↔":""}</div>
-            <DurationBadge t={t}/>
-            <div style={{display:"flex",gap:4,marginTop:3}}><span style={{fontSize:9,background:SM[t.status]?.bg,color:SM[t.status]?.color,borderRadius:10,padding:"1px 6px",fontWeight:700}}>{SM[t.status]?.label}</span><span style={{fontSize:9,background:PC[t.priority]+"22",color:PC[t.priority],borderRadius:10,padding:"1px 6px",fontWeight:700}}>{t.priority}</span></div>
-          </div>)}
-        </div>);
-      })}
-    </div>);
-  }
-
-  function renderDaily(){
-    const ds=fmt(cur),ts=tfd(ds),comp=ts.filter(t=>t.status==="completed").length;
-    const hasTimeBlocks=ts.some(t=>t.startTime||t._dayStartTime);
-    return(<div style={{maxWidth:700,margin:"0 auto",display:"flex",gap:14,flexWrap:"wrap"}}>
-      <div style={{flex:"1 1 300px",minWidth:0}}>
-        {ts.length>0&&<div style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:12,padding:"10px 16px",marginBottom:12,display:"flex",alignItems:"center",gap:12}}>
-          <span style={{fontSize:13,color:"#94a3b8",flexShrink:0}}>Progress</span>
-          <div style={{flex:1,height:8,background:"#1e293b",borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:`${ts.length?Math.round((comp/ts.length)*100):0}%`,background:"linear-gradient(90deg,#6366f1,#10b981)",borderRadius:4,transition:"width .4s"}}/></div>
-          <span style={{fontSize:13,fontWeight:700,color:"#10b981",flexShrink:0}}>{comp}/{ts.length} done</span>
-        </div>}
-        {ts.length===0&&<div style={{textAlign:"center",color:"#475569",padding:36,fontSize:14}}>No tasks for this day.</div>}
-        {ts.map(t=>{const s=SM[t.status]||SM.pending;return(<div key={(t._oid||t.id)+t.date} onClick={()=>setShowDetail(t)} style={{background:"#0f172a",border:`1px solid ${s.color}44`,borderLeft:`4px solid ${s.color}`,borderRadius:12,padding:14,marginBottom:10,cursor:"pointer"}}>
-          <div style={{display:"flex",alignItems:"flex-start",gap:10}}>
-            <div style={{flex:1}}>
-              <div style={{fontWeight:700,fontSize:15,color:t.status==="completed"?"#475569":"#e2e8f0",textDecoration:t.status==="completed"?"line-through":"none"}}>{t.title}{t._isMid?" (continued)":""}</div>
-              {t.notes&&<div style={{fontSize:12,color:"#64748b",marginTop:2}}>{t.notes}</div>}
-              <DurationBadge t={t}/>
-              {(t.status==="missed"||t.status==="deferred")&&t.reason&&<div style={{fontSize:11,color:s.color,background:s.bg,borderRadius:6,padding:"4px 8px",marginTop:5}}><strong>{t.status==="missed"?"Missed":"Deferred"}:</strong> {t.reason}{t.reasonDetail?` — ${t.reasonDetail}`:""}</div>}
-              {t.completedAt&&<div style={{fontSize:11,color:"#10b981",marginTop:4}}>✅ {new Date(t.completedAt).toLocaleString()}</div>}
-              <div style={{display:"flex",gap:4,marginTop:6}}><span style={{fontSize:10,background:s.bg,color:s.color,borderRadius:20,padding:"2px 8px",fontWeight:700}}>{s.icon} {s.label}</span></div>
-            </div>
-            <span style={{background:PC[t.priority]+"22",color:PC[t.priority],borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700,flexShrink:0}}>{t.priority}</span>
-          </div>
-        </div>);})}
-      </div>
-      {/* Timeline */}
-      {hasTimeBlocks&&<div style={{flex:"0 0 200px",background:"#0f172a",border:"1px solid #1e293b",borderRadius:12,padding:10}}>
-        <div style={{fontSize:10,color:"#64748b",fontWeight:700,textTransform:"uppercase",marginBottom:8,textAlign:"center"}}>Timeline</div>
-        <div style={{position:"relative",background:"#020617",borderRadius:8,overflow:"hidden"}}>
-          {HOURS.map(hr=><div key={hr} style={{display:"flex",height:36,borderBottom:"1px solid #0f172a"}}>
-            <div style={{width:30,fontSize:8,color:"#475569",fontWeight:600,padding:"2px 3px 0",textAlign:"right",flexShrink:0}}>{hr>12?hr-12:hr}{hr>=12?"p":"a"}</div>
-            <div style={{flex:1,borderLeft:"1px solid #1e293b22"}}/>
-          </div>)}
-          <div style={{position:"absolute",top:0,left:30,right:0,bottom:0}}>
-            {ts.map(t=>{
-              const st=t._dayStartTime||t.startTime,et=t._dayEndTime||t.endTime;
-              const bs=getBlockStyle(st,et,t.color);
-              if(!bs)return null;
-              return(<div key={(t._oid||t.id)+t.date} style={{...bs,border:`1px solid ${t.color}66`,cursor:"pointer"}} onClick={()=>setShowDetail(t)}>
-                <div style={{fontWeight:700,fontSize:8,color:"#fff",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{t.title}</div>
-                <div style={{fontSize:7,color:"#cbd5e1"}}>{fmtTime(st)}–{fmtTime(et)}</div>
-              </div>);
-            })}
-          </div>
-        </div>
-      </div>}
-    </div>);
-  }
-
-  if(loading)return(
-    <div style={{minHeight:"100vh",background:"#020617",display:"flex",alignItems:"center",justifyContent:"center"}}>
-      <div style={{textAlign:"center"}}>
-        <div style={{fontSize:40,marginBottom:12}}>☁️</div>
-        <div style={{color:"#6366f1",fontWeight:700,fontSize:16}}>Connecting to live calendar...</div>
-        <div style={{color:"#475569",fontSize:12,marginTop:6}}>Powered by Supabase</div>
-      </div>
-    </div>
-  );
-
-  return(<div style={{minHeight:"100vh",background:"#020617",color:"#e2e8f0",fontFamily:"'Segoe UI',sans-serif",padding:"16px"}}>
-  <div style={{maxWidth:1050,margin:"0 auto"}}>
-    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
+  return(
+  <div className="layout-wrapper">
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:24,flexWrap:"wrap",gap:16,background:"#0b1120",padding:"20px 24px",borderRadius:16,border:"1px solid #1e293b"}}>
       <div>
-        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
-          <h1 style={{margin:0,fontSize:20,fontWeight:800,background:"linear-gradient(90deg,#6366f1,#8b5cf6)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>📋 TaskCalendar</h1>
-          <span style={{background:"#10b98122",color:"#10b981",borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700,border:"1px solid #10b98144"}}>👁 Live Team View</span>
-          {liveMsg&&<span style={{background:"#6366f122",color:"#6366f1",borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700}}>{liveMsg}</span>}
+        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:8}}>
+          <h1 style={{margin:0,fontSize:26,fontWeight:800}} className="gradient-text">📋 TaskCalendar</h1>
+          <span style={{background:"#10b98122",color:"#10b981",borderRadius:20,padding:"4px 12px",fontSize:12,fontWeight:800,border:"1px solid #10b98144"}}><span className="live-dot"></span> LIVE TEAM VIEW</span>
         </div>
-        <div style={{fontSize:11,color:"#475569"}}>
-          {lastUpdated&&<span>Owner last updated: <strong style={{color:"#94a3b8"}}>{lastUpdated}</strong> &nbsp;·&nbsp;</span>}
-          <span style={{color:"#10b981"}}>✅ {doneC}</span>&nbsp;·&nbsp;<span style={{color:"#f59e0b"}}>⏳ {pendC}</span>&nbsp;·&nbsp;<span style={{color:"#ef4444"}}>❌ {missC}</span>&nbsp;·&nbsp;<span style={{color:"#8b5cf6"}}>🔄 {defC}</span>&nbsp;·&nbsp;<span style={{color:"#6366f1",fontWeight:700}}>{rate}% done</span>
-        </div>
+        <div style={{fontSize:13,color:"#64748b",fontWeight:600}}>{lastUpdated ? `Last Sync: ${lastUpdated}` : 'Syncing...'} · 🔒 Read-Only</div>
       </div>
-      <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-        {["daily","weekly","monthly"].map(v=><button key={v} onClick={()=>setView(v)} style={{padding:"6px 14px",borderRadius:20,border:"none",background:view===v?"#6366f1":"#1e293b",color:view===v?"#fff":"#94a3b8",fontWeight:700,fontSize:12,cursor:"pointer",textTransform:"capitalize"}}>{v}</button>)}
-      </div>
+      <div style={{display:"flex",gap:8,background:"#020617",padding:6,borderRadius:24,border:"1px solid #1e293b"}}>{["daily","weekly","monthly"].map(v=><button key={v} onClick={()=>setView(v)} className={`view-toggle-btn ${view===v ? 'active' : 'inactive'}`}>{v}</button>)}</div>
     </div>
 
-    <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:12}}>
-      {[["✅","Completed",doneC,"#10b981"],["⏳","Pending",pendC,"#f59e0b"],["❌","Missed",missC,"#ef4444"],["🔄","Deferred",defC,"#8b5cf6"]].map(([icon,label,val,color])=>(
-        <div key={label} style={{background:"#0f172a",border:`1px solid ${color}33`,borderRadius:10,padding:"10px 14px",display:"flex",alignItems:"center",gap:10}}>
-          <div style={{fontSize:20}}>{icon}</div>
-          <div><div style={{fontSize:18,fontWeight:800,color}}>{val}</div><div style={{fontSize:10,color:"#64748b",fontWeight:600}}>{label}</div></div>
+    {activeTask && (
+      <div style={{background:"linear-gradient(90deg, #1e293b, #0f172a)", border:"1px solid #3b82f655", borderLeft:"4px solid #3b82f6", borderRadius:16, padding:"16px 24px", marginBottom:24, display:"flex", alignItems:"center", gap:16}} onClick={()=>setShowDetail(activeTask)} className="btn-action">
+        <div style={{fontSize:24}}>🔥</div>
+        <div style={{flex:1}}><div style={{fontSize:12, color:"#3b82f6", fontWeight:800, textTransform:"uppercase"}}>Currently Working On</div><div style={{fontSize:18, color:"#e2e8f0", fontWeight:800}}>{activeTask.title}</div></div>
+      </div>
+    )}
+
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(200px, 1fr))",gap:16,marginBottom:24}}>
+      {[["✅","Done",doneC,"#10b981"],["⏳","Pending",pendC,"#f59e0b"],["❌","Missed",missC,"#ef4444"]].map(([icon,lbl,val,clr])=>(
+        <div key={lbl} style={{background:"#0f172a",border:`1px solid ${clr}33`,borderRadius:16,padding:"16px 20px",display:"flex",alignItems:"center",gap:16}}>
+          <div style={{fontSize:28, background:clr+"11", padding:10, borderRadius:12}}>{icon}</div>
+          <div><div style={{fontSize:24,fontWeight:800,color:clr}}>{val}</div><div style={{fontSize:12,color:"#64748b",fontWeight:700,textTransform:"uppercase"}}>{lbl}</div></div>
         </div>
       ))}
     </div>
 
-    <div style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:10,padding:"10px 16px",marginBottom:12,display:"flex",alignItems:"center",gap:12}}>
-      <span style={{fontSize:12,color:"#94a3b8",flexShrink:0}}>Overall Progress</span>
-      <div style={{flex:1,height:8,background:"#1e293b",borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:`${rate}%`,background:"linear-gradient(90deg,#6366f1,#10b981)",borderRadius:4,transition:"width .6s"}}/></div>
-      <span style={{fontSize:13,fontWeight:700,color:"#6366f1",flexShrink:0}}>{rate}%</span>
+    <div style={{display:"flex",gap:12,marginBottom:24,flexWrap:"wrap",alignItems:"center",background:"#0b1120",padding:"12px 20px",borderRadius:16,border:"1px solid #1e293b"}}>
+      {["all","High","Medium","Low"].map(p=><button key={p} onClick={()=>setPfilt(p)} style={{padding:"6px 14px",borderRadius:20,border:"none",fontSize:12,fontWeight:700,cursor:"pointer",background:pfilt===p?(p==="all"?"#334155":PC[p]+"33"):"#020617",color:pfilt===p?(p==="all"?"#e2e8f0":PC[p]):"#64748b",boxShadow:pfilt===p?`0 0 0 1px ${p==="all"?"#475569":PC[p]}`:"none"}} className="btn-action">{p==="all"?"All Priorities":p}</button>)}
     </div>
 
-    <div style={{display:"flex",gap:4,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
-      {["all","High","Medium","Low"].map(p=><button key={p} onClick={()=>setPfilt(p)} style={{padding:"3px 10px",borderRadius:20,border:"none",fontSize:11,fontWeight:600,cursor:"pointer",background:pfilt===p?(p==="all"?"#334155":PC[p]+"33"):"#0f172a",color:pfilt===p?(p==="all"?"#e2e8f0":PC[p]):"#475569",outline:pfilt===p?`1px solid ${p==="all"?"#334155":PC[p]}`:"none"}}>{p==="all"?"All Priority":p}</button>)}
-      <div style={{width:1,height:16,background:"#1e293b",margin:"0 2px"}}/>
-      {["all","pending","completed","missed","deferred"].map(s=>{const m=SM[s]||{};return(<button key={s} onClick={()=>setSfilt(s)} style={{padding:"3px 10px",borderRadius:20,border:"none",fontSize:11,fontWeight:600,cursor:"pointer",background:sfilt===s?(s==="all"?"#334155":m.bg):"#0f172a",color:sfilt===s?(s==="all"?"#e2e8f0":m.color):"#475569",outline:sfilt===s?`1px solid ${s==="all"?"#334155":m.color}`:"none"}}>{s==="all"?"All Status":`${m.icon} ${m.label}`}</button>);})}
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:16,marginBottom:24}}>
+      <button onClick={()=>nav(-1)} className="nav-arrow">‹</button>
+      <button onClick={()=>setCur(new Date(tod))} style={{background:"none",border:"none",color:"#6366f1",fontWeight:800,fontSize:14,cursor:"pointer"}} className="btn-action">Today</button>
+      <span style={{fontWeight:800,fontSize:18,color:"#e2e8f0",minWidth:250,textAlign:"center"}}>{navLabel()}</span>
+      <button onClick={()=>nav(1)} className="nav-arrow">›</button>
     </div>
 
-    <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:14,marginBottom:16}}>
-      <button onClick={()=>nav(-1)} style={{background:"#1e293b",border:"none",color:"#e2e8f0",borderRadius:8,padding:"5px 13px",fontSize:16,cursor:"pointer"}}>‹</button>
-      <button onClick={()=>setCur(new Date(tod))} style={{background:"none",border:"none",color:"#6366f1",fontWeight:700,fontSize:12,cursor:"pointer"}}>Today</button>
-      <span style={{fontWeight:700,fontSize:14,color:"#e2e8f0",minWidth:220,textAlign:"center"}}>{navLabel()}</span>
-      <button onClick={()=>nav(1)} style={{background:"#1e293b",border:"none",color:"#e2e8f0",borderRadius:8,padding:"5px 13px",fontSize:16,cursor:"pointer"}}>›</button>
-    </div>
+    {view==="monthly" && (
+      <div className="month-grid">
+        {mCells.map((date,i)=>{
+          if(!date) return <div key={i}/>;
+          const ds=fmt(date),ts=tfd(ds),dInfo=getDayInfo(ds);
+          return(<div key={ds} onClick={()=>{setCur(new Date(ds+"T00:00:00"));setView("daily");}} style={{minHeight:100,background:dInfo.isOff?"#050811":"#0b1120",border:ds===fmt(tod)?"2px solid #6366f1":"1px solid #1e293b",borderRadius:12,padding:8,cursor:"pointer"}}>
+            <span style={{fontWeight:800,color:dInfo.isOff?"#475569":"#cbd5e1"}}>{date.getDate()}</span>
+            {dInfo.isOff && <div className="day-badge" style={{background:dInfo.bg, color:dInfo.color}}>{dInfo.label.split(' ')[0]}</div>}
+            {ts.slice(0,3).map(t=><div key={t.id+ds} style={{background:t.color+"22",borderLeft:`3px solid ${SM[t.status].color}`,borderRadius:4,padding:"2px 5px",marginTop:4,fontSize:10,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.title}</div>)}
+          </div>);
+        })}
+      </div>
+    )}
 
-    {view==="monthly"&&renderMonthly()}
-    {view==="weekly"&&renderWeekly()}
-    {view==="daily"&&renderDaily()}
+    {view==="weekly" && (
+      <div className="week-grid">
+        {Array.from({length:7},(_,i)=>addD(sow(cur),i)).map(date=>{
+          const ds=fmt(date),ts=tfd(ds),dInfo=getDayInfo(ds);
+          return(<div key={ds} className="week-col" style={{background:dInfo.isOff?"#050811":"#0b1120"}}>
+            <div className="week-col-header">
+              <div style={{fontSize:12,color:"#94a3b8",fontWeight:800}}>{DAYS[date.getDay()]}</div>
+              <div style={{fontSize:24,fontWeight:800}}>{date.getDate()}</div>
+              {dInfo.isOff && <div className="day-badge" style={{background:dInfo.bg, color:dInfo.color}}>{dInfo.label}</div>}
+            </div>
+            <div className="week-col-body">
+              {ts.map(t=>(<div key={t.id+ds} className="task-card" style={{borderLeftColor: SM[t.status].color}} onClick={()=>setShowDetail(t)}>
+                <div style={{fontSize:13,fontWeight:700}}>{t.title}</div>
+                <div className="hover-details"><DurationBadge t={t}/><div style={{marginTop:8}}><span style={{fontSize:10,background:SM[t.status].bg,color:SM[t.status].color,padding:"3px 10px",borderRadius:20,fontWeight:800}}>{SM[t.status].icon} {SM[t.status].label}</span></div></div>
+              </div>))}
+            </div>
+          </div>);
+        })}
+      </div>
+    )}
 
-    <div style={{textAlign:"center",marginTop:20,padding:"10px",background:"#0f172a",borderRadius:10,fontSize:11,color:"#334155"}}>
-      👁 Read-only · Live sync via Supabase · Click any task for details
-    </div>
-  </div>
-  {showDetail&&<TaskDetail t={showDetail} onClose={()=>setShowDetail(null)}/>}
+    {view==="daily" && (
+      <div className="daily-container">
+        <div className="daily-tasks">
+          {getDayInfo(fmt(cur)).isOff && <div style={{background:getDayInfo(fmt(cur)).bg, padding:20, borderRadius:16, marginBottom:20, fontWeight:800, color:getDayInfo(fmt(cur)).color}}>{getDayInfo(fmt(cur)).label} - Day Off</div>}
+          {tfd(fmt(cur)).map(t=>(<div key={t.id} className="task-card" style={{borderLeftColor:SM[t.status].color, padding:16}} onClick={()=>setShowDetail(t)}>
+            <div style={{fontWeight:800,fontSize:16}}>{t.title}</div>
+            <div className="hover-details"><DurationBadge t={t}/><div style={{marginTop:8,color:SM[t.status].color}}>{SM[t.status].icon} {SM[t.status].label}</div></div>
+          </div>))}
+        </div>
+      </div>
+    )}
+
+    {showDetail && <TaskDetail t={showDetail} onClose={() => setShowDetail(null)} />}
   </div>);
 }
+const mCells=[]; const yr=tod.getFullYear(), mo=tod.getMonth(); const fd=new Date(yr,mo,1).getDay(), dim=new Date(yr,mo+1,0).getDate(); for(let i=0;i<fd;i++)mCells.push(null); for(let d=1;d<=dim;d++)mCells.push(new Date(yr,mo,d));
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
 </body>
